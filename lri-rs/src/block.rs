@@ -7,7 +7,7 @@ use lri_proto::{
 
 use crate::{
 	AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat, HdrMode, RawData, RawImage,
-	SceneMode, SensorModel,
+	SceneMode, SensorData, SensorModel,
 };
 
 pub(crate) struct Block<'lri> {
@@ -59,6 +59,7 @@ impl<'lri> Block<'lri> {
 			image_focal_length,
 			af_info,
 			mut view_preferences,
+			sensor_data,
 			..
 		} = if let Message::LightHeader(lh) = self.message() {
 			lh
@@ -210,6 +211,20 @@ impl<'lri> Block<'lri> {
 		if let Some(x) = image_focal_length {
 			ext.focal_length.get_or_insert(x);
 		}
+
+		for sd in sensor_data {
+			let sd: crate::SensorData = sd.into();
+			println!(
+				"black={} white={} cliff={}",
+				sd.characterization.black_level,
+				sd.characterization.white_level,
+				sd.characterization
+					.cliff_slope
+					.map(|f| f.to_string())
+					.unwrap_or_default()
+			);
+			ext.sensor_data.push(sd);
+		}
 	}
 
 	// It kept making my neat little array very, very tall
@@ -279,6 +294,8 @@ pub(crate) struct ExtractedData {
 
 	pub awb: Option<AwbMode>,
 	pub awb_gain: Option<AwbGain>,
+
+	pub sensor_data: Vec<SensorData>,
 }
 
 pub enum Message {

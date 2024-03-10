@@ -131,9 +131,6 @@ fn gather() -> ! {
 			let sens = match img.sensor {
 				SensorModel::Ar1335 => "a13",
 				SensorModel::Ar1335Mono => "a1m",
-				SensorModel::Ar835 => "!!!ar8",
-				SensorModel::Imx386 => "!!!imx",
-				SensorModel::Imx386Mono => "!!!imm",
 				SensorModel::Unknown => "???",
 			};
 

@@ -7,6 +7,8 @@ A friend archived a lot of Light L16 stuff at [helloavo/Light-L16-Archive](https
 ### lri-rs
 A Rust crate for parsing LRI files. This library isn't perfect, but it works enough to be able to grab image data from the files. 
 
+The code here is a mess, but I'm working to improve it. Reading the metadata from the LRI files is weird! It's all in protobuf messages and those protobuf messages make *a lot* or stuff "optional". We end up with a lot of duplicated data
+
 ### prism
 Breaks an LRI into the individual images it contains  
 `prism <lri> <output_directory>`
@@ -14,7 +16,7 @@ Breaks an LRI into the individual images it contains
 TODO: I'd like to, one day, be able to write DNG files from prism, but currently it just spits out PNG.
 
 ### lri-proto
-This is a gently modified version of the [dllu/lri.rs](https://github.com/dllu/lri-rs) repository. Without the work from Daniel pulling the protobuf definitions from the Lumen software I truly don't know if I could've got as far as I did.
+This is a gently modified version of the [dllu/lri-rs](https://github.com/dllu/lri-rs) repository. Without the work from Daniel pulling the protobuf definitions from the Lumen software I truly don't know if I could've got as far as I did.
 
 MIT Copyright Daniel Lawrence Lu
 

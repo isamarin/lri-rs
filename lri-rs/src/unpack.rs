@@ -39,7 +39,7 @@ pub fn tenbit(packd: &[u8], count: usize, upack: &mut [u16]) {
 		upack[idx + 3] = b4 as u16;
 	}
 
-	if remain.len() > 0 {
+	if !remain.is_empty() {
 		let mut long_bytes = [0x00; 8];
 
 		for (idx, byte) in remain.iter().enumerate() {
@@ -55,7 +55,3 @@ pub fn tenbit(packd: &[u8], count: usize, upack: &mut [u16]) {
 		}
 	}
 }
-
-//pub fn twelvebit(packed: &[u8]) {
-// 3 bytes per 2 12-bits
-//}

@@ -4,6 +4,7 @@ use block::{Block, ExtractedData, Header};
 
 mod block;
 mod types;
+mod unpack;
 
 pub use types::*;
 
@@ -153,6 +154,11 @@ impl<'img> RawImage<'img> {
 		self.color.iter().find(|c| c.whitepoint == whitepoint)
 	}
 
+	/// Return a string describing the colour filter array used for this image.
+	/// `None` is returned if the sensor is monochromatic.
+	///
+	/// NOTE: The same sensor can return differing cfa patterns for different
+	/// images. This is likely due to in-camera corrected rotation.
 	pub fn cfa_string(&self) -> Option<&'static str> {
 		match self.sensor {
 			SensorModel::Ar1335Mono => None,
@@ -163,9 +169,6 @@ impl<'img> RawImage<'img> {
 
 	// The AR1335 seems to be BGGR, which was weird.
 	fn cfa_string_ar1335(&self) -> Option<&'static str> {
-		//if self.format == DataFormat::BayerJpeg {
-		//	Some("BGGR")
-		//} else {
 		match self.sbro {
 			(-1, -1) => None,
 			(0, 0) => Some("BGGR"),
@@ -174,17 +177,27 @@ impl<'img> RawImage<'img> {
 			(1, 1) => Some("RGGB"),
 			_ => unreachable!(),
 		}
-		//}
 	}
 
 	/// Uses the [SensorModel] to determine if the image's [ColorType].
 	/// If the sensor model is unknown, [SensorModel::Unknown], then [ColorType::Grayscale] is returned
 	pub fn color_type(&self) -> ColorType {
 		match self.sensor {
-			SensorModel::Ar1335 | SensorModel::Ar835 | SensorModel::Imx386 => ColorType::Rgb,
-			SensorModel::Ar1335Mono | SensorModel::Imx386Mono | SensorModel::Unknown => {
-				ColorType::Grayscale
-			}
+			SensorModel::Ar1335 => ColorType::Rgb,
+			SensorModel::Ar1335Mono | SensorModel::Unknown => ColorType::Grayscale,
+		}
+	}
+
+	/// Returns the unpacked data if the DataFormat is Packed10bpp, otherwise
+	/// returns None
+	pub fn unpack(&self) -> Option<Vec<u16>> {
+		if let RawData::Packed10bpp { data } = self.data {
+			let count = self.width * self.height;
+			let mut upack = vec![0; count];
+			unpack::tenbit(data, count, &mut upack);
+			Some(upack)
+		} else {
+			None
 		}
 	}
 }
@@ -197,7 +210,7 @@ pub enum ColorType {
 #[derive(Copy, Clone, Debug)]
 /// Colour information about the camera. Used to correct the image
 pub struct ColorInfo {
-	/// Which specific colour this image was taken by
+	/// Which specific camera this image was taken by
 	pub camera: CameraId,
 
 	/// The whitepoint that the forward matrix corresponds to.

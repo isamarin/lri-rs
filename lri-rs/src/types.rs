@@ -13,7 +13,7 @@ use lri_proto::{
 pub enum DataFormat {
 	BayerJpeg,
 	Packed10bpp,
-	// Never seen
+	// Never seen. These are likely from other devices with the Light ASIC
 	//Packed12bpp,
 	//Packed14bpp,
 }
@@ -23,8 +23,6 @@ impl fmt::Display for DataFormat {
 		let str = match self {
 			Self::BayerJpeg => "BayerJpeg",
 			Self::Packed10bpp => "Packed10bpp",
-			//Self::Packed12bpp => "Packed12bpp",
-			//Self::Packed14bpp => "Packed14bpp",
 		};
 
 		write!(f, "{str}")
@@ -126,14 +124,15 @@ impl From<IlluminantType> for Whitepoint {
 	}
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SensorModel {
 	Unknown,
-	Ar835,
 	Ar1335,
 	Ar1335Mono,
-	Imx386,
-	Imx386Mono,
+	// Never Seen. Likely from other devices with the Light ASIC
+	//Ar835,
+	//Imx386,
+	//Imx386Mono,
 }
 
 impl From<lri_proto::sensor_type::SensorType> for SensorModel {
@@ -142,11 +141,11 @@ impl From<lri_proto::sensor_type::SensorType> for SensorModel {
 
 		match pbst {
 			ProtoSt::SENSOR_UNKNOWN => Self::Unknown,
-			ProtoSt::SENSOR_AR835 => Self::Ar835,
 			ProtoSt::SENSOR_AR1335 => Self::Ar1335,
 			ProtoSt::SENSOR_AR1335_MONO => Self::Ar1335Mono,
-			ProtoSt::SENSOR_IMX386 => Self::Imx386,
-			ProtoSt::SENSOR_IMX386_MONO => Self::Imx386Mono,
+			ProtoSt::SENSOR_AR835 | ProtoSt::SENSOR_IMX386 | ProtoSt::SENSOR_IMX386_MONO => {
+				unimplemented!()
+			}
 		}
 	}
 }
@@ -230,6 +229,38 @@ impl From<lri_proto::view_preferences::view_preferences::ChannelGain> for AwbGai
 			gr: gain.g_r.unwrap(),
 			gb: gain.g_b.unwrap(),
 			b: gain.b.unwrap(),
+		}
+	}
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct SensorData {
+	pub sensor_type: SensorModel,
+	pub characterization: SensorCharacterization,
+}
+
+impl From<lri_proto::lightheader::SensorData> for SensorData {
+	fn from(sd: lri_proto::lightheader::SensorData) -> Self {
+		Self {
+			sensor_type: sd.type_().into(),
+			characterization: sd.data.into_option().unwrap().into(),
+		}
+	}
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct SensorCharacterization {
+	pub black_level: f32,
+	pub white_level: f32,
+	pub cliff_slope: Option<f32>,
+}
+
+impl From<lri_proto::sensor_characterization::SensorCharacterization> for SensorCharacterization {
+	fn from(sc: lri_proto::sensor_characterization::SensorCharacterization) -> Self {
+		Self {
+			black_level: sc.black_level.unwrap(),
+			white_level: sc.white_level.unwrap(),
+			cliff_slope: sc.cliff_slope,
 		}
 	}
 }
