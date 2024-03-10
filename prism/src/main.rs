@@ -34,7 +34,7 @@ fn main() {
 	println!("{} images", lri.image_count());
 
 	if let Some(refimg) = lri.reference_image() {
-		output::make_png(refimg, directory.join("reference.png"), gain);
+		println!("The reference camera is {}", refimg.camera);
 	}
 
 	let mut set: HashMap<CameraId, Entry> = HashMap::new();
@@ -52,7 +52,8 @@ fn main() {
 		println!("{} {:?} {}", kv.0, kv.1.sensor, kv.1.count);
 	});*/
 
-	for (idx, img) in lri.images().enumerate() {
-		output::make_png(img, directory.join(format!("image_{idx}.png")), gain);
+	for img in lri.images() {
+		let path = format!("{}.png", img.camera);
+		output::make_png(img, directory.join(path), gain);
 	}
 }
