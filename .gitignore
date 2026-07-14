@@ -1,5 +1,6 @@
 /target
 *.png
+!lumen/src-tauri/icons/*.png
 *.jpg
 *.bjp
 *.gif
