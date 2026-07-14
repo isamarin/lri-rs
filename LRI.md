@@ -84,7 +84,7 @@ Full proto: [`lightheader.proto`](lri-proto/proto/lightheader.proto)
 | LightHeader field | Destination | Notes |
 | ----------------- | ----------- | ----- |
 | `hw_info.camera[]` | `Vec<CameraInfo>` | Maps `CameraId` → `SensorModel` |
-| `module_calibration[]` | `Vec<ColorInfo>` | Per-camera colour profiles |
+| `module_calibration[]` | `Vec<ColorInfo>` + `FusionMeta.module_geometry` | Colour + geometry summary |
 | `modules[]` | `Vec<RawImage>` | One entry per camera module with `sensor_data_surface` |
 | `image_reference_camera` | `LriFile.image_reference_camera` | Viewfinder / reference camera |
 | `device_fw_version` | `LriFile.firmware_version` | First non-empty wins |
@@ -93,9 +93,21 @@ Full proto: [`lightheader.proto`](lri-proto/proto/lightheader.proto)
 | `view_preferences` (nested) | Shot metadata via `extract_view()` | Same path as standalone ViewPreferences block |
 | `sensor_data[]` | `LriFile.sensor_data` | Black/white levels via `levels_for(sensor)` |
 
+### Fusion-related extraction
+
+See [FUSION.md](FUSION.md) for the combine roadmap. This fork extracts:
+
+| Field | Destination |
+| ----- | ----------- |
+| `module_calibration[].geometry` | `FusionMeta.module_geometry` (K/R/t per focus, mirror type, distortion flags) |
+| `tof_range` | `FusionMeta.tof_range_m` |
+| `device_calibration.tof` | `FusionMeta.tof_calibration` |
+| `imu_data[]` | `FusionMeta.imu` (sample counts) |
+| `gps_data` | `FusionMeta.gps` |
+
 ### Not extracted (present in proto, ignored)
 
-`image_unique_id_*`, `image_time_stamp`, `device_*`, `device_calibration`, `gold_cc`, `tof_range`, `proximity_sensors`, `flash_data`, `imu_data`, `gps_data` (also available as block type 2), `compatibility`, `face_data`, per-module `af_info`, geometry/vignetting/hot-pixel/dead-pixel maps inside `module_calibration`.
+`image_unique_id_*`, `image_time_stamp`, `device_*` (except ToF cal), `gold_cc`, `proximity_sensors`, `flash_data`, `compatibility`, `face_data`, per-module hot/dead pixel maps, full vignetting/distortion/mirror actuator tables, standalone GPS blocks (type 2).
 
 ## L16 camera modules
 

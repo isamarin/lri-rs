@@ -7,6 +7,8 @@ use lri_rs::LriFile;
 use rayon::prelude::*;
 
 use crate::render;
+use crate::session::LriSession;
+use crate::threads;
 
 pub fn run(input: &Utf8Path, output: &Utf8Path, jobs: Option<usize>) -> Result<()> {
 	run_with_progress(input, output, jobs, |_, _, _| {})
@@ -18,20 +20,35 @@ pub fn run_with_progress(
 	jobs: Option<usize>,
 	on_progress: impl Fn(usize, usize, &str) + Send + Sync + 'static,
 ) -> Result<()> {
-	if let Some(n) = jobs {
-		rayon::ThreadPoolBuilder::new()
-			.num_threads(n)
-			.build_global()
-			.context("configure thread pool")?;
-	}
+	let session = LriSession::open(input)?;
+	run_session_with_progress(&session, output, jobs, on_progress)
+}
 
+pub fn run_session_with_progress(
+	session: &LriSession,
+	output: &Utf8Path,
+	jobs: Option<usize>,
+	on_progress: impl Fn(usize, usize, &str) + Send + Sync + 'static,
+) -> Result<()> {
+	let n = threads::export_jobs(jobs);
+	let pool = rayon::ThreadPoolBuilder::new()
+		.num_threads(n)
+		.build()
+		.context("configure thread pool")?;
+
+	session.with_lri(|lri| {
+		pool.install(|| run_decoded(lri, output, on_progress))
+	})
+}
+
+fn run_decoded(
+	lri: &LriFile<'_>,
+	output: &Utf8Path,
+	on_progress: impl Fn(usize, usize, &str) + Send + Sync + 'static,
+) -> Result<()> {
 	if !output.exists() {
 		std::fs::create_dir_all(output).context("create output directory")?;
 	}
-
-	let bytes = std::fs::read(input).with_context(|| format!("read {}", input))?;
-	let lri = LriFile::decode(&bytes).context("decode LRI")?;
-	let lri = Arc::new(lri);
 
 	let total = lri.image_count();
 	let done = AtomicUsize::new(0);

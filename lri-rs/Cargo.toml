@@ -6,7 +6,8 @@ edition.workspace = true
 [dependencies]
 lri-proto = { path = "../lri-proto" }
 thiserror = "2"
-zune-jpeg = "0.3.17"
+zune-core = "0.5"
+zune-jpeg = "0.5"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

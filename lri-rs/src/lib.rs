@@ -1,14 +1,16 @@
 use std::time::Duration;
 
-use block::{Block, ExtractedData, Header};
+use block::{Block, BlockType, ExtractedData, Header};
 
 mod bayer_jpeg;
 mod block;
 mod error;
+mod fusion;
 mod types;
 pub mod unpack;
 
 pub use error::LriError;
+pub use fusion::*;
 pub use types::*;
 
 pub struct LriFile<'lri> {
@@ -28,6 +30,8 @@ pub struct LriFile<'lri> {
 	pub on_tripod: Option<bool>,
 	pub awb: Option<AwbMode>,
 	pub awb_gain: Option<AwbGain>,
+
+	pub fusion: FusionMeta,
 }
 
 impl<'lri> LriFile<'lri> {
@@ -48,6 +52,11 @@ impl<'lri> LriFile<'lri> {
 					need: end,
 					have: cursor.len(),
 				});
+			}
+
+			if header.kind == BlockType::Gps {
+				cursor = &cursor[end..];
+				continue;
 			}
 
 			let block = Block {
@@ -87,6 +96,7 @@ impl<'lri> LriFile<'lri> {
 			on_tripod: ext.on_tripod,
 			awb: ext.awb,
 			awb_gain: ext.awb_gain,
+			fusion: ext.fusion,
 		})
 	}
 
@@ -203,6 +213,25 @@ impl<'img> RawImage<'img> {
 			}
 			RawData::BayerJpeg { .. } => {
 				bayer_jpeg::decode(&self.data, self.width, self.height)
+			}
+		}
+	}
+
+	/// Fast preview decode (single JPEG plane for Bayer JPEG modules).
+	pub fn decode_preview(&self) -> Result<bayer_jpeg::PreviewPixels, LriError> {
+		match self.data {
+			RawData::Packed10bpp { data } => {
+				let count = self.width * self.height;
+				let mut upack = vec![0; count];
+				unpack::tenbit(data, count, &mut upack)?;
+				Ok(bayer_jpeg::PreviewPixels {
+					data: upack,
+					width: self.width,
+					height: self.height,
+				})
+			}
+			RawData::BayerJpeg { .. } => {
+				bayer_jpeg::decode_preview(&self.data, self.width, self.height)
 			}
 		}
 	}

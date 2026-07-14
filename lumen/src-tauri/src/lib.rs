@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+
 use camino::Utf8PathBuf;
 use light::api::{self, DirScan, LriSummary};
-use lri_rs::LriFile;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
+
+mod state;
+
+use state::AppState;
 
 #[derive(Clone, Serialize)]
 struct ExportProgress {
@@ -13,8 +18,8 @@ struct ExportProgress {
 }
 
 #[tauri::command]
-fn inspect_lri(path: String) -> Result<LriSummary, String> {
-	api::inspect_file(&path).map_err(|e| e.to_string())
+fn inspect_lri(state: State<AppState>, path: String) -> Result<LriSummary, String> {
+	state.open(&path)
 }
 
 #[tauri::command]
@@ -25,42 +30,57 @@ fn scan_directory(path: String) -> Result<DirScan, String> {
 #[tauri::command]
 async fn extract_lri(
 	app: AppHandle,
+	state: State<'_, AppState>,
 	input: String,
 	output: String,
 	jobs: Option<usize>,
 ) -> Result<usize, String> {
+	let summary = state.open(&input)?;
+	let count = summary.image_count;
 	let input = Utf8PathBuf::from(input);
 	let output = Utf8PathBuf::from(output);
-	let count = api::inspect_file(&input)
-		.map_err(|e| e.to_string())?
-		.image_count;
+	let handle = state.inner().clone();
 
 	let app2 = app.clone();
 	tauri::async_runtime::spawn_blocking(move || {
-		light::extract::run_with_progress(&input, &output, jobs, move |done, total, camera| {
-			let _ = app2.emit(
-				"export-progress",
-				ExportProgress {
-					done,
-					total,
-					camera: camera.to_string(),
-				},
-			);
+		handle.with_session(input.as_str(), |session| {
+			light::extract::run_session_with_progress(session, &output, jobs, move |done, total, camera| {
+				let _ = app2.emit(
+					"export-progress",
+					ExportProgress {
+						done,
+						total,
+						camera: camera.to_string(),
+					},
+				);
+			})
+			.map_err(|e| e.to_string())
 		})
 	})
 	.await
-	.map_err(|e| e.to_string())?
-	.map_err(|e| e.to_string())?;
+	.map_err(|e| e.to_string())??;
 
 	Ok(count)
 }
 
 #[tauri::command]
-fn camera_thumbnail(path: String, camera: String) -> Result<String, String> {
-	let camera = light::thumbnail::parse_camera_id(&camera).ok_or("unknown camera id")?;
-	let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-	let lri = LriFile::decode(&data).map_err(|e| e.to_string())?;
-	light::thumbnail::thumbnail_base64(&lri, camera).map_err(|e| e.to_string())
+fn camera_thumbnails_batch(
+	state: State<AppState>,
+	path: String,
+	cameras: Vec<String>,
+	jobs: Option<usize>,
+) -> Result<HashMap<String, String>, String> {
+	state.with_session(&path, |session| {
+		session
+			.with_lri(|lri| {
+				let ids: Vec<_> = cameras
+					.iter()
+					.filter_map(|c| light::thumbnail::parse_camera_id(c))
+					.collect();
+				light::thumbnail::thumbnails_batch(lri, &ids, jobs)
+			})
+			.map_err(|e| e.to_string())
+	})
 }
 
 #[tauri::command]
@@ -88,12 +108,13 @@ async fn pick_output_dir(app: tauri::AppHandle) -> Result<Option<String>, String
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
 	tauri::Builder::default()
+		.manage(AppState::new())
 		.plugin(tauri_plugin_dialog::init())
 		.invoke_handler(tauri::generate_handler![
 			inspect_lri,
 			scan_directory,
 			extract_lri,
-			camera_thumbnail,
+			camera_thumbnails_batch,
 			pick_lri_file,
 			pick_directory,
 			pick_output_dir,

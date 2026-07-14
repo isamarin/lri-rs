@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  calver:
+    name: CalVer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/calver
+      - run: ./scripts/calver check
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: calver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: calver
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+            build: cargo build --release -p light -p lri-rs -p lri-proto
+          - os: macos-latest
+            packages: ""
+            build: cargo build --release -p light -p lumen -p lri-rs
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - run: ${{ matrix.build }}

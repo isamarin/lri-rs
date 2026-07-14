@@ -1,4 +1,13 @@
-.PHONY: build release release-fast install bench check lumen lumen-release
+.PHONY: build release release-fast install bench check lumen lumen-release version version-bump version-check
+
+version:
+	@./scripts/calver show
+
+version-bump:
+	@./scripts/calver bump
+
+version-check:
+	@./scripts/calver check
 
 build:
 	cargo build -p light

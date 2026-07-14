@@ -1,8 +1,12 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use lri_rs::{AwbMode, DataFormat, HdrMode, LriFile, SceneMode, SensorModel};
+use lri_rs::{AwbMode, DataFormat, HdrMode, LriFile, MirrorType, SceneMode, SensorModel};
+use rayon::prelude::*;
 use serde::Serialize;
+
+use crate::session::LriSession;
+use crate::threads;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LriSummary {
@@ -21,6 +25,17 @@ pub struct LriSummary {
 	pub reference_camera: Option<String>,
 	pub image_count: usize,
 	pub cameras: Vec<CameraSummary>,
+	pub fusion: FusionSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FusionSummary {
+	pub geometry_modules: usize,
+	pub modules_with_intrinsics: usize,
+	pub movable_mirror_modules: usize,
+	pub tof_range_m: Option<f32>,
+	pub imu_frames: Option<usize>,
+	pub has_gps: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,40 +55,52 @@ pub struct DirScan {
 }
 
 pub fn inspect_file(path: impl AsRef<Path>) -> Result<LriSummary> {
-	let path = path.as_ref();
-	let data = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-	let lri = LriFile::decode(&data).context("decode LRI")?;
-	let name = path
-		.file_stem()
-		.map(|s| s.to_string_lossy().into_owned())
-		.unwrap_or_default();
+	LriSession::open(path)?.summary()
+}
 
-	Ok(summarize(
-		path.to_string_lossy().into_owned(),
-		name,
-		&lri,
-	))
+pub fn summarize(path: String, name: String, lri: &LriFile<'_>) -> LriSummary {
+	summarize_inner(path, name, lri)
 }
 
 pub fn scan_directory(path: impl AsRef<Path>) -> Result<DirScan> {
 	let path = path.as_ref();
-	let mut files = Vec::new();
+	let jobs = threads::export_jobs(None);
+	let pool = rayon::ThreadPoolBuilder::new()
+		.num_threads(jobs)
+		.build()
+		.context("scan thread pool")?;
 
-	for entry in std::fs::read_dir(path).with_context(|| format!("read {}", path.display()))? {
-		let entry = entry?;
-		let meta = entry.metadata()?;
-		if !meta.is_file() {
-			continue;
-		}
-		let p = entry.path();
-		if p.extension().and_then(|e| e.to_str()) != Some("lri") {
-			continue;
-		}
-		match inspect_file(&p) {
-			Ok(summary) => files.push(summary),
-			Err(e) => eprintln!("{}: {e}", p.display()),
-		}
-	}
+	let entries: Vec<PathBuf> = std::fs::read_dir(path)
+		.with_context(|| format!("read {}", path.display()))?
+		.filter_map(|entry| entry.ok())
+		.filter(|entry| {
+			entry
+				.metadata()
+				.map(|m| m.is_file())
+				.unwrap_or(false)
+		})
+		.map(|entry| entry.path())
+		.filter(|p| p.extension().and_then(|e| e.to_str()) == Some("lri"))
+		.collect();
+
+	let mut files = pool.install(|| {
+		entries
+			.par_iter()
+			.filter_map(|p| match LriSession::open(p) {
+				Ok(session) => match session.summary() {
+					Ok(summary) => Some(summary),
+					Err(e) => {
+						eprintln!("{}: {e}", p.display());
+						None
+					}
+				},
+				Err(e) => {
+					eprintln!("{}: {e}", p.display());
+					None
+				}
+			})
+			.collect::<Vec<_>>()
+	});
 
 	files.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -83,7 +110,7 @@ pub fn scan_directory(path: impl AsRef<Path>) -> Result<DirScan> {
 	})
 }
 
-fn summarize(path: String, name: String, lri: &LriFile<'_>) -> LriSummary {
+fn summarize_inner(path: String, name: String, lri: &LriFile<'_>) -> LriSummary {
 	LriSummary {
 		path,
 		name,
@@ -104,6 +131,23 @@ fn summarize(path: String, name: String, lri: &LriFile<'_>) -> LriSummary {
 			.map(|c| c.to_string()),
 		image_count: lri.image_count(),
 		cameras: lri.images().map(camera_summary).collect(),
+		fusion: fusion_summary(lri),
+	}
+}
+
+fn fusion_summary(lri: &LriFile<'_>) -> FusionSummary {
+	let fusion = &lri.fusion;
+	FusionSummary {
+		geometry_modules: fusion.geometry_module_count(),
+		modules_with_intrinsics: fusion.modules_with_intrinsics(),
+		movable_mirror_modules: fusion
+			.module_geometry
+			.iter()
+			.filter(|m| m.mirror_type == Some(MirrorType::Movable))
+			.count(),
+		tof_range_m: fusion.tof_range_m,
+		imu_frames: fusion.imu.as_ref().map(|i| i.frames),
+		has_gps: fusion.gps.is_some(),
 	}
 }
 

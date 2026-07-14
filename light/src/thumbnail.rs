@@ -1,12 +1,13 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use lri_rs::{CameraId, LriFile, RawImage};
-use nalgebra::Matrix3;
 use png::{BitDepth, ColorType, Encoder};
-use rawproc::colorspace::BayerRgb;
-use rawproc::image::{Image, RawMetadata};
+use rayon::prelude::*;
 
 use crate::render::rotate_180;
+use crate::threads;
 
 const MAX_SIDE: u32 = 160;
 
@@ -17,8 +18,30 @@ pub fn thumbnail_base64(lri: &LriFile<'_>, camera: CameraId) -> Result<String> {
 		.find(|i| i.camera == camera)
 		.context("camera not in file")?;
 
-	let png = render_thumbnail(img, lri)?;
+	let png = render_thumbnail_fast(img, lri)?;
 	Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
+}
+
+pub fn thumbnails_batch(
+	lri: &LriFile<'_>,
+	cameras: &[CameraId],
+	jobs: Option<usize>,
+) -> Result<HashMap<String, String>> {
+	let n = threads::export_jobs(jobs);
+	let pool = rayon::ThreadPoolBuilder::new()
+		.num_threads(n)
+		.build()
+		.context("thumbnail thread pool")?;
+
+	pool.install(|| {
+		cameras
+			.par_iter()
+			.map(|&camera| {
+				let data_url = thumbnail_base64(lri, camera)?;
+				Ok((camera.to_string(), data_url))
+			})
+			.collect::<Result<HashMap<_, _>>>()
+	})
 }
 
 pub fn parse_camera_id(name: &str) -> Option<CameraId> {
@@ -44,55 +67,25 @@ pub fn parse_camera_id(name: &str) -> Option<CameraId> {
 	}
 }
 
-fn render_thumbnail(img: &RawImage<'_>, lri: &LriFile<'_>) -> Result<Vec<u8>> {
+/// Grid preview: subsampled Bayer as grayscale — no debayer.
+fn render_thumbnail_fast(img: &RawImage<'_>, lri: &LriFile<'_>) -> Result<Vec<u8>> {
 	let (black, white) = lri.levels_for(img.sensor);
 	let range = (white - black).max(1) as f32;
 
-	let bayer = img.decode_pixels().context("decode")?;
-	let step = subsample_step(img.width, img.height, MAX_SIDE);
-	let (mut bayer, sw, sh) = subsample(&bayer, img.width, img.height, step);
+	let preview = img.decode_preview().context("decode preview")?;
+	let step = subsample_step(preview.width, preview.height, MAX_SIDE);
+	let (mut bayer, sw, sh) = subsample(&preview.data, preview.width, preview.height, step);
 	rotate_180(&mut bayer, 1);
 
-	let bytes = match img.cfa_string() {
-		Some(cfa) => {
-			let rawimg: Image<u16, BayerRgb> = Image::from_raw_parts(
-				sw,
-				sh,
-				RawMetadata {
-					whitebalance: [1.0; 3],
-					whitelevels: [white; 3],
-					crop: None,
-					cfa: rawloader::CFA::new(cfa),
-					cam_to_xyz: Matrix3::zeros(),
-				},
-				bayer,
-			);
-			let mut rgb = rawimg.debayer().data;
-			rotate_180(&mut rgb, 3);
-			rgb.chunks(3)
-				.flat_map(|px| {
-					px.iter().map(|p| {
-						let n = (*p).saturating_sub(black) as f32 / range;
-						(n * 255.0).clamp(0.0, 255.0) as u8
-					})
-				})
-				.collect::<Vec<u8>>()
-		}
-		None => bayer
-			.iter()
-			.map(|p| {
-				let n = (*p).saturating_sub(black) as f32 / range;
-				(n * 255.0).clamp(0.0, 255.0) as u8
-			})
-			.collect(),
-	};
+	let bytes: Vec<u8> = bayer
+		.iter()
+		.map(|p| {
+			let n = (*p).saturating_sub(black) as f32 / range;
+			(n * 255.0).clamp(0.0, 255.0) as u8
+		})
+		.collect();
 
-	let (w, h, color) = match img.cfa_string() {
-		Some(_) => (sw as u32, sh as u32, ColorType::Rgb),
-		None => (sw as u32, sh as u32, ColorType::Grayscale),
-	};
-
-	encode_png(w, h, &bytes, color)
+	encode_png(sw as u32, sh as u32, &bytes, ColorType::Grayscale)
 }
 
 fn subsample_step(width: usize, height: usize, max_side: u32) -> usize {

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# CalVer for lri-rs — YYYY.M.D (Cargo semver); same-day rebuilds: YYYY.M.D-dev.N
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION_FILE="$ROOT/VERSION"
+CARGO_TOML="$ROOT/Cargo.toml"
+TAURI_CONF="$ROOT/lumen/src-tauri/tauri.conf.json"
+
+today() {
+	python3 - <<'PY'
+from datetime import datetime, timezone
+d = datetime.now(timezone.utc)
+print(f"{d.year}.{d.month}.{d.day}")
+PY
+}
+
+read_version() {
+	tr -d '[:space:]' <"$VERSION_FILE"
+}
+
+write_version() {
+	printf '%s\n' "$1" >"$VERSION_FILE"
+}
+
+sync_files() {
+	local version="$1"
+	perl -i -pe "s/^version = \".*\"/version = \"$version\"/" "$CARGO_TOML"
+	perl -i -pe "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/" "$TAURI_CONF"
+}
+
+cmd="${1:-}"
+
+case "$cmd" in
+	show)
+		read_version
+		;;
+	bump)
+		write_version "$(today)"
+		sync_files "$(read_version)"
+		echo "version → $(read_version)"
+		;;
+	bump-micro)
+		t="$(today)"
+		cur="$(read_version)"
+		if [[ "$cur" == "$t" ]]; then
+			write_version "${t}-dev.1"
+		elif [[ "$cur" =~ ^${t//./\\.}-dev\.([0-9]+)$ ]]; then
+			micro="${BASH_REMATCH[1]}"
+			write_version "${t}-dev.$((micro + 1))"
+		else
+			echo "error: current version $cur is not today's ($t); use 'bump' first" >&2
+			exit 1
+		fi
+		sync_files "$(read_version)"
+		echo "version → $(read_version)"
+		;;
+	sync)
+		sync_files "$(read_version)"
+		echo "synced → $(read_version)"
+		;;
+	check)
+		expected="$(read_version)"
+		cargo_ver="$(perl -ne 'print $1 if /^version = "(.*)"/' "$CARGO_TOML")"
+		tauri_ver="$(perl -ne 'print $1 if /"version": "(.*)"/' "$TAURI_CONF")"
+		ok=1
+		if [[ "$cargo_ver" != "$expected" ]]; then
+			echo "Cargo.toml: $cargo_ver (want $expected)" >&2
+			ok=0
+		fi
+		if [[ "$tauri_ver" != "$expected" ]]; then
+			echo "tauri.conf.json: $tauri_ver (want $expected)" >&2
+			ok=0
+		fi
+		if [[ "$ok" -eq 0 ]]; then
+			echo "run: ./scripts/calver sync" >&2
+			exit 1
+		fi
+		echo "ok: $expected"
+		;;
+	*)
+		echo "usage: $0 {show|bump|bump-micro|sync|check}" >&2
+		exit 1
+		;;
+esac

@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use lri_rs::{AwbMode, DataFormat, HdrMode, LriFile, SceneMode, SensorModel};
+use lri_rs::{AwbMode, DataFormat, HdrMode, LriFile, MirrorType, SceneMode, SensorModel};
 use owo_colors::OwoColorize;
 
 pub fn run(data_dir: &Utf8Path) -> Result<()> {
@@ -146,6 +146,31 @@ pub fn run(data_dir: &Utf8Path) -> Result<()> {
 				DataFormat::Packed10bpp => print!("{} ", sens.yellow()),
 			}
 		}
+
+		let fus = &lri.fusion;
+		print!(
+			" | fus geo:{}/{}",
+			fus.modules_with_intrinsics(),
+			fus.geometry_module_count()
+		);
+		let movable = fus
+			.module_geometry
+			.iter()
+			.filter(|m| m.mirror_type == Some(MirrorType::Movable))
+			.count();
+		if movable > 0 {
+			print!(" mir:{movable}");
+		}
+		if let Some(tof) = fus.tof_range_m {
+			print!(" tof:{tof:.2}");
+		}
+		if let Some(imu) = &fus.imu {
+			print!(" imu:{}", imu.frames);
+		}
+		if fus.gps.is_some() {
+			print!(" gps");
+		}
+
 		println!();
 	}
 

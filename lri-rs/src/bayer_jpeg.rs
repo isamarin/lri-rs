@@ -1,5 +1,14 @@
+use zune_core::bytestream::ZCursor;
+
 use crate::error::LriError;
 use crate::RawData;
+
+/// Decoded preview plane (one JPEG for colour modules).
+pub struct PreviewPixels {
+	pub data: Vec<u16>,
+	pub width: usize,
+	pub height: usize,
+}
 
 /// Decode Bayer JPEG payload into a full-resolution 10-bit-ish Bayer plane.
 pub fn decode(data: &RawData<'_>, width: usize, height: usize) -> Result<Vec<u16>, LriError> {
@@ -22,6 +31,50 @@ pub fn decode(data: &RawData<'_>, width: usize, height: usize) -> Result<Vec<u16
 		} => match *format {
 			0 => decode_colour(count, width, height, jpeg0, jpeg1, jpeg2, jpeg3),
 			1 => decode_mono(count, jpeg0),
+			other => Err(LriError::BayerJpegDecode(format!(
+				"unknown format_type {other}"
+			))),
+		},
+	}
+}
+
+/// Fast grid preview: decode a single JPEG plane (¼ decode work for colour).
+pub fn decode_preview(data: &RawData<'_>, width: usize, height: usize) -> Result<PreviewPixels, LriError> {
+	match data {
+		RawData::Packed10bpp { .. } => Err(LriError::UnsupportedFormat),
+		RawData::BayerJpeg { format, jpeg0, .. } => match *format {
+			1 => {
+				let count = width
+					.checked_mul(height)
+					.ok_or(LriError::PixelCountMismatch {
+						expected: 0,
+						got: 0,
+					})?;
+				let mut gray = vec![0u8; count];
+				decode_jpeg_into(jpeg0, &mut gray)?;
+				Ok(PreviewPixels {
+					data: gray.into_iter().map(promote_u8).collect(),
+					width,
+					height,
+				})
+			}
+			0 => {
+				let half_w = width / 2;
+				let half_h = height / 2;
+				let plane_len = half_w
+					.checked_mul(half_h)
+					.ok_or(LriError::PixelCountMismatch {
+						expected: 0,
+						got: 0,
+					})?;
+				let mut plane = vec![0u8; plane_len];
+				decode_jpeg_into(jpeg0, &mut plane)?;
+				Ok(PreviewPixels {
+					data: plane.into_iter().map(promote_u8).collect(),
+					width: half_w,
+					height: half_h,
+				})
+			}
 			other => Err(LriError::BayerJpegDecode(format!(
 				"unknown format_type {other}"
 			))),
@@ -76,7 +129,7 @@ fn promote_u8(sample: u8) -> u16 {
 }
 
 fn decode_jpeg_into(jpeg: &[u8], out: &mut [u8]) -> Result<(), LriError> {
-	zune_jpeg::JpegDecoder::new(jpeg)
+	zune_jpeg::JpegDecoder::new(ZCursor::new(jpeg))
 		.decode_into(out)
 		.map_err(|e| LriError::BayerJpegDecode(e.to_string()))
 }

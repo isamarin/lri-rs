@@ -6,8 +6,8 @@ use lri_proto::{
 };
 
 use crate::{
-	error::LriError, AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat, HdrMode,
-	RawData, RawImage, SceneMode, SensorData, SensorModel,
+	error::LriError, fusion, AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat,
+	FusionMeta, HdrMode, RawData, RawImage, SceneMode, SensorData, SensorModel,
 };
 
 pub(crate) struct Block<'lri> {
@@ -75,6 +75,10 @@ impl<'lri> Block<'lri> {
 			mut af_info,
 			mut view_preferences,
 			sensor_data,
+			device_calibration,
+			tof_range,
+			imu_data,
+			gps_data,
 			..
 		} = lh;
 
@@ -93,6 +97,10 @@ impl<'lri> Block<'lri> {
 
 		for mcal in module_calibration {
 			let camera = mcal.camera_id().into();
+
+			if let Some(geo) = fusion::extract_module_geometry(&mcal) {
+				ext.fusion.module_geometry.push(geo);
+			}
 
 			for mut color in mcal.color {
 				let whitepoint = color.type_().into();
@@ -243,6 +251,24 @@ impl<'lri> Block<'lri> {
 			ext.sensor_data.push(sd.into());
 		}
 
+		if let Some(range) = tof_range {
+			ext.fusion.tof_range_m.get_or_insert(range);
+		}
+
+		if let Some(dc) = device_calibration.into_option() {
+			if let Some(tof) = fusion::tof_from_device(dc) {
+				ext.fusion.tof_calibration = Some(tof);
+			}
+		}
+
+		if !imu_data.is_empty() {
+			ext.fusion.imu = Some(fusion::imu_summary(&imu_data));
+		}
+
+		if let Some(gps) = gps_data.into_option() {
+			ext.fusion.gps = fusion::gps_from_proto(gps);
+		}
+
 		Ok(())
 	}
 
@@ -314,6 +340,8 @@ pub(crate) struct ExtractedData {
 	pub awb_gain: Option<AwbGain>,
 
 	pub sensor_data: Vec<SensorData>,
+
+	pub fusion: FusionMeta,
 }
 
 pub enum Message {
@@ -362,7 +390,8 @@ impl Header {
 	}
 }
 
-pub enum BlockType {
+#[derive(PartialEq, Eq)]
+pub(crate) enum BlockType {
 	LightHeader,
 	ViewPreferences,
 	Gps,

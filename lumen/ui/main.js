@@ -41,6 +41,15 @@ function renderMeta(summary) {
 		metaCard("AWB", summary.awb),
 		metaCard("WB gains", awb),
 		metaCard("Reference", summary.reference_camera),
+		metaCard(
+			"Fusion data",
+			summary.fusion
+				? `geo ${summary.fusion.modules_with_intrinsics}/${summary.fusion.geometry_modules}` +
+					(summary.fusion.tof_range_m != null ? ` · tof ${summary.fusion.tof_range_m.toFixed(2)}m` : "") +
+					(summary.fusion.imu_frames != null ? ` · imu ${summary.fusion.imu_frames}` : "") +
+					(summary.fusion.has_gps ? " · gps" : "")
+				: null
+		),
 	].join("");
 }
 
@@ -81,19 +90,26 @@ function renderCameras(summary) {
 async function loadThumbnails(summary) {
 	const gen = ++thumbGen;
 	const path = summary.path;
+	const cameras = summary.cameras.map((c) => c.id);
 
-	for (const cam of summary.cameras) {
+	for (const id of cameras) {
+		const cell = document.querySelector(`[data-cam="${id}"] img`);
+		if (cell) cell.classList.add("loading");
+	}
+
+	try {
+		const thumbs = await invoke("camera_thumbnails_batch", { path, cameras, jobs: null });
 		if (gen !== thumbGen) return;
-		const cell = document.querySelector(`[data-cam="${cam.id}"] img`);
-		if (!cell) continue;
-
-		cell.classList.add("loading");
-		try {
-			const dataUrl = await invoke("camera_thumbnail", { path, camera: cam.id });
-			if (gen !== thumbGen) return;
+		for (const [id, dataUrl] of Object.entries(thumbs)) {
+			const cell = document.querySelector(`[data-cam="${id}"] img`);
+			if (!cell) continue;
 			cell.src = dataUrl;
 			cell.classList.remove("loading");
-		} catch (e) {
+		}
+	} catch (e) {
+		for (const id of cameras) {
+			const cell = document.querySelector(`[data-cam="${id}"] img`);
+			if (!cell) continue;
 			cell.classList.remove("loading");
 			cell.alt = "err";
 		}
