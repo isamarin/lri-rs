@@ -2042,6 +2042,7 @@ version = "2026.7.14"
 dependencies = [
  "criterion",
  "lri-proto",
+ "nalgebra",
  "thiserror 2.0.18",
  "zune-core",
  "zune-jpeg",

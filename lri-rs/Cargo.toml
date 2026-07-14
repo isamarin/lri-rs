@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 lri-proto = { path = "../lri-proto" }
+nalgebra = "0.31"
 thiserror = "2"
 zune-core = "0.5"
 zune-jpeg = "0.5"

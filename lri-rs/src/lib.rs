@@ -4,13 +4,18 @@ use block::{Block, BlockType, ExtractedData, Header};
 
 mod bayer_jpeg;
 mod block;
+pub mod distortion;
 mod error;
 mod fusion;
 pub mod fixtures;
 mod mirror_pose;
+pub mod stereo;
 mod types;
 pub mod unpack;
+pub mod warp;
 
+pub use distortion::{ModuleDistortion, PolynomialDistortion};
+pub use warp::CameraPose;
 pub use error::LriError;
 pub use fusion::*;
 pub use types::*;

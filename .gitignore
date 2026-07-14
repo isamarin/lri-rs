@@ -5,3 +5,4 @@
 *.bjp
 *.gif
 **/.DS_Store
+/.data-from-camera/

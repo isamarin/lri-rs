@@ -232,9 +232,9 @@ fn fusion_detail(fusion: &FusionMeta) -> FusionDetail {
 				mirror_type: m.mirror_type.map(mirror_type_str),
 				has_vignetting: m.has_vignetting,
 				distortion: DistortionJson {
-					polynomial: m.distortion.polynomial,
-					cra: m.distortion.cra,
-					poly_coeffs: m.distortion.poly_coeffs,
+					polynomial: m.distortion.has_polynomial(),
+					cra: m.distortion.has_cra,
+					poly_coeffs: m.distortion.poly_coeffs(),
 				},
 				focus_calibrations: m
 					.focus_calibrations

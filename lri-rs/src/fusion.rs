@@ -43,7 +43,7 @@ pub struct ModuleGeometry {
 	pub camera: CameraId,
 	pub mirror_type: Option<MirrorType>,
 	pub focus_calibrations: Vec<FocusCalibration>,
-	pub distortion: DistortionSummary,
+	pub distortion: crate::distortion::ModuleDistortion,
 	pub has_vignetting: bool,
 }
 
@@ -52,13 +52,6 @@ pub enum MirrorType {
 	None,
 	Glued,
 	Movable,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct DistortionSummary {
-	pub polynomial: bool,
-	pub cra: bool,
-	pub poly_coeffs: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -349,7 +342,7 @@ mod tests {
 				bundle(CAL_FOCUS_FAR, Some(halls.1), true, false),
 				bundle(CAL_FOCUS_NEAR, None, false, true),
 			],
-			distortion: DistortionSummary::default(),
+			distortion: crate::distortion::ModuleDistortion::default(),
 			has_vignetting: false,
 		}
 	}
@@ -376,7 +369,7 @@ mod tests {
 				bundle(CAL_FOCUS_FAR, Some(1556.0), true, false),
 				bundle(CAL_FOCUS_NEAR, None, false, false),
 			],
-			distortion: DistortionSummary::default(),
+			distortion: crate::distortion::ModuleDistortion::default(),
 			has_vignetting: false,
 		};
 		let sel = pick_focus_bundle(&m, 87).unwrap();
@@ -451,7 +444,7 @@ mod tests {
 				},
 				bundle(CAL_FOCUS_NEAR, None, false, true),
 			],
-			distortion: DistortionSummary::default(),
+			distortion: crate::distortion::ModuleDistortion::default(),
 			has_vignetting: false,
 		};
 		let sel = pick_focus_bundle_with_mirror(&m, 87, Some(769)).unwrap();
@@ -523,6 +516,10 @@ pub(crate) fn mat3(mat: lri_proto::matrix3x3f::Matrix3x3F) -> [f32; 9] {
 
 pub(crate) fn point3(p: lri_proto::point3f::Point3F) -> [f32; 3] {
 	[p.x(), p.y(), p.z()]
+}
+
+pub(crate) fn point2f(p: lri_proto::point2f::Point2F) -> [f32; 2] {
+	[p.x(), p.y()]
 }
 
 pub(crate) fn range2f(r: lri_proto::range2f::Range2F) -> Range2F {
@@ -677,14 +674,22 @@ pub(crate) fn extract_module_geometry(
 		});
 	}
 
-	let mut distortion = DistortionSummary::default();
+	let mut distortion = crate::distortion::ModuleDistortion::default();
 	if let Some(dist) = geometry.distortion.as_ref() {
 		if let Some(poly) = dist.polynomial.as_ref() {
-			distortion.polynomial = true;
-			distortion.poly_coeffs = poly.coeffs.len();
+			if let (Some(c), Some(n)) = (
+				poly.distortion_center.as_ref(),
+				poly.normalization.as_ref(),
+			) {
+				distortion.polynomial = Some(crate::distortion::PolynomialDistortion {
+					center: point2f(c.clone()),
+					normalization: point2f(n.clone()),
+					coeffs: poly.coeffs.clone(),
+				});
+			}
 		}
 		if dist.cra.is_some() {
-			distortion.cra = true;
+			distortion.has_cra = true;
 		}
 	}
 
