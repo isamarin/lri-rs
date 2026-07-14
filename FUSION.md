@@ -157,7 +157,7 @@ Open questions — fill in when confirmed:
 
 | Path | Contents | Fusion relevance |
 | ---- | -------- | ---------------- |
-| [`Lumen/`](vendor/light-l16/Lumen/) | Desktop app binaries | Reverse-engineer combine pipeline, shaders, strings |
+| [`Lumen/`](vendor/light-l16/Lumen/) | `Lumen-2.3.0.606.dmg` — **`libcp.dylib`** (CIAPI) | Combine pipeline RE — see log entry 2026-07-14 |
 | [`Hardware/`](vendor/light-l16/Hardware/) | Exploded view, sensor layout | Physical module positions vs `GeometricCalibration` |
 | [`Guides/`](vendor/light-l16/Guides/) | L16 photography blog clone | Capture behaviour, marketing claims |
 | [`APKs/`](vendor/light-l16/APKs/) | Camera / Gallery apps | On-device processing hints |
@@ -231,3 +231,54 @@ When working on fusion:
 **Confidence:** confirmed (for this fork)  
 **Finding:** Seller must demonstrate: boots → shoots → `.lri` on disk without Light cloud. All 16 modules present in file.  
 **Implication:** Brick risk is activation/cloud, not decode — once you have `.lri`, this repo handles RAW.
+
+### 2026-07-14 — Lumen combine reverse-engineered from `libcp.dylib` (CIAPI)
+
+**Confidence:** confirmed (symbols + log strings); pipeline **order** is `likely` (inferred from deps + error messages, not a recovered call graph)  
+**Source:** [`vendor/light-l16/Lumen/Lumen-2.3.0.606.dmg`](vendor/light-l16/Lumen/Lumen-2.3.0.606.dmg) → `Lumen.app/Contents/Frameworks/libcp.dylib` (~6.9 MB), `libceres.dylib`  
+**Tools:** `nm -gU | c++filt`, `strings`, `otool -L` on macOS (verified 2026-07-14 in this repo)
+
+**Verified strings (sample):** `Cannot process undistortion without Stereo!`, `ComputeFlowField only configured for 3-6 pyramid levels!`, `Number of flow fields should match number of source images!`, `SGM after upsampled depth is not allowed.`, `Super-res does not support mono modules!`, `Effective focal length must be larger than reference focal length!`, `GDepth:Format="RangeInverse"`, `DepthAndOcc`, `ReferenceImageCache not implemented for mono camera!`  
+**Verified symbols:** `CIAPI::RendererBase::setInputDataStream`, `CIAPI::DirectRenderer`, `CIAPI::ImagePyramid`, `CIAPI::DepthEditor::*`, `lt::ComputeFlowField`, `lt::StereoLayer`, `lt::ReferenceImageCache`, `lt::MonoFusion`, `ceres::AutoDiffCostFunction<lt::Internal::ReProjectionCost…>`, Halide runtime (`halide_runtime`, `Halide::Runtime::Internal::*`)
+
+**Stack:** Qt5/QML front-end · **Ceres** (non-linear least squares) · **Halide** (compiled compute kernels; `_halide_*`, 3–6 pyramid levels) · libjpeg-turbo (`jsimd`) · proprietary **`libcp.dylib`** exposing namespace **`CIAPI`** (Computational Imaging API) · `liblricompression` (codec — already reimplemented here). Internal build subsystems (from leaked Jenkins paths): `camera` (dominant), `stereo`, `3rdparty`.
+
+**API spine (`CIAPI::Renderer` / `RendererBase` / `DirectRenderer`):**
+`setInputDataStream(.lri bytes)` → `render(level, ROI, RenderType)` → `outputBuffer()` / `writeImage(stream, size, ExportImageFormat)`. Property bag (`ParamFloat/Int/String/…`), `serialize/deserialize(StateType)` = the `.lumen` state file, `setOutputUpdateListener(ImagePyramid, ROI, level)` (progressive tiled output). Desktop-only depth features (`Renderer in Desktop profile`).
+
+**Reconstructed pipeline (`likely` order, each stage name = confirmed string):**
+
+```
+.lri → per-module RAW + GeometricCalibration        (we have this)
+     → Stereo: undistort → SGM disparity, coarse→fine over 3–6 level ImagePyramid,
+       seeded by ToF → depth                         ("Cannot process undistortion without Stereo",
+                                                       "SGM after upsampled depth is not allowed")
+     → ComputeFlowField: one dense flow field per source module
+                                                      ("Number of flow fields should match number of source images",
+                                                       "ComputeFlowField only configured for 3-6 pyramid levels")
+     → warp/resample each module into reference-camera frame using depth+flow (Halide)
+                                                      (reference = widest module: "Effective focal length
+                                                       must be larger than reference focal length")
+     → Super-res: color/tele modules add detail onto wide reference (mono excluded)
+                                                      ("Super-res does not support mono modules")
+     → Blend with occlusion + confidence weights      ("DepthAndOcc", "confidence")
+     → Ceres refine (poses/alignment; residuals ↔ proto reprojection_error/stereo_error)
+     → DepthEditor (brush/heal/lasso/quick-select/face matte) → re-render → Refocus (synthetic bokeh)
+     → writeImage; depth exportable as Google GDepth XMP, Format="RangeInverse" (inverse-range)
+```
+
+**Confirmed facts for the rebuild:**
+- Depth is the spine and is **computed per-shot by SGM stereo**, not just read from ToF — ToF is a seed/prior. Calibration in `.lri` is the initialization; Ceres re-solves (matches `rms_error`/`stereo_error`/`reprojection_error` proto fields).
+- **Reference module = widest (28 mm-equiv)**; tele (70/150) modules are warped in and super-resolve detail onto it.
+- **Mono (C-row) modules**: feed depth + luminance; **excluded from super-res** ("Empty mono!", "ReferenceImageCache not implemented for mono camera", panchromatic noise cal).
+- Depth stored **inverse-range** (disparity-like); Lumen embeds Google Photos depthmap XMP.
+- Multi-scale everywhere: **3–6 level image pyramids** for both SGM and flow.
+
+**Implication for combine:** the "hard part" is now named — implement, in order: (1) undistort via extracted `Distortion`; (2) **pyramidal SGM disparity** between overlapping modules using K/R/t (+ ToF seed) → inverse-range depth; (3) per-module **dense flow** refine; (4) **depth-guided warp** all modules to the widest reference; (5) **occlusion-aware multiband blend**, color modules super-res, mono → luma. Ceres is optional for an MVP (use calibration poses directly).
+
+**Follow-up:**
+- [ ] `nm`/`strings` pass on the `camera` subsystem symbols (module → sensor-type → focal-group mapping).
+- [ ] Confirm SGM param / pyramid-level count vs focal group.
+- [ ] Validate on a real `.lri`: do all 16 modules carry per-focus geometry? Is depth per-focus?
+- [ ] Prototype: undistort + 2-view SGM (reference 28 mm ↔ one 70 mm) → depth → warp → feather blend, as the smallest end-to-end slice.
+- [ ] Extract `stereo_state.proto` from binary strings / archive if not already in protos.
