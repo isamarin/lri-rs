@@ -21,16 +21,30 @@ jobs:
       - run: ./scripts/calver check
 
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
     needs: calver
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # lumen/Tauri needs GTK — skip on Linux in test job
+          - os: ubuntu-latest
+            packages: ""
+            cmd: cargo test -p lri-rs -p lri-proto -p light
+          - os: macos-latest
+            packages: ""
+            cmd: cargo test --workspace
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - name: Install Linux deps
+        if: matrix.packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - run: ${{ matrix.cmd }}
 
   build:
     name: Build (${{ matrix.os }})
