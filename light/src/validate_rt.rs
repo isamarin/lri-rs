@@ -536,5 +536,17 @@ mod tests {
 		assert!(summary.blend_ncc_vs_lumen > 0.0);
 		assert_eq!(summary.modules.len(), 10);
 		assert!(summary.modules.iter().any(|m| m.has_movable_mirror));
+		let b2 = summary.modules.iter().find(|m| m.camera == "B2").expect("B2");
+		let b3 = summary.modules.iter().find(|m| m.camera == "B3").expect("B3");
+		let b2_ncc = b2.lumen_ncc.expect("B2 lumen ncc");
+		let b3_ncc = b3.lumen_ncc.expect("B3 lumen ncc");
+		assert!(
+			b2_ncc > 0.15,
+			"B2 lumen_ncc should align after mirror flip fix, got {b2_ncc}"
+		);
+		assert!(
+			b3_ncc > 0.15,
+			"B3 lumen_ncc should align after mirror flip fix, got {b3_ncc}"
+		);
 	}
 }

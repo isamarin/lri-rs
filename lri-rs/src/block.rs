@@ -126,7 +126,7 @@ impl<'lri> Block<'lri> {
 
 		for mut module in modules {
 			let camera = module.id().into();
-			if let Some(hall) = module.mirror_position {
+			if let Some(hall) = mirror_hall_from_module(&module) {
 				ext.fusion.mirror_hall_codes.insert(camera, hall);
 			}
 			let mut surface = match module.sensor_data_surface.take() {
@@ -398,4 +398,87 @@ pub(crate) enum BlockType {
 	LightHeader,
 	ViewPreferences,
 	Gps,
+}
+
+fn mirror_hall_from_module(module: &lri_proto::camera_module::CameraModule) -> Option<i32> {
+	module
+		.af_info
+		.as_ref()
+		.and_then(|af| af.mirror_position)
+		.or(module.mirror_position)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use lri_proto::{lightheader::LightHeader, Message as PbMessage};
+
+	fn all_light_headers(bytes: &[u8]) -> Vec<LightHeader> {
+		let mut out = Vec::new();
+		let mut cursor = bytes;
+		while !cursor.is_empty() {
+			let Ok(header) = Header::ingest(cursor) else {
+				break;
+			};
+			let end = header.block_length.min(cursor.len());
+			if header.kind == BlockType::LightHeader {
+				let block = Block {
+					header,
+					data: &cursor[..end],
+				};
+				if let Ok(lh) = LightHeader::parse_from_bytes(block.message_data()) {
+					out.push(lh);
+				}
+			}
+			cursor = &cursor[end..];
+		}
+		out
+	}
+
+	#[test]
+	fn l16_mirror_hall_lives_in_af_info_for_tele_modules() {
+		let Some(bytes) = crate::fixtures::l16_00078_bytes() else {
+			return;
+		};
+		let headers = all_light_headers(&bytes);
+		assert!(!headers.is_empty(), "expected light header block");
+		let mut rows = Vec::new();
+		for lh in &headers {
+			for module in &lh.modules {
+				rows.push((
+					module.id(),
+					module.mirror_position,
+					module
+						.af_info
+						.as_ref()
+						.and_then(|af| af.mirror_position),
+				));
+			}
+		}
+		eprintln!("light headers={} module rows={}", headers.len(), rows.len());
+		let b2 = rows.iter().find(|(id, _, _)| *id == lri_proto::camera_id::CameraID::B2);
+		let b3 = rows.iter().find(|(id, _, _)| *id == lri_proto::camera_id::CameraID::B3);
+		let b1 = rows.iter().find(|(id, _, _)| *id == lri_proto::camera_id::CameraID::B1);
+		eprintln!("mirror halls: {rows:?}");
+		if let Some(b2) = b2 {
+			assert_eq!(b2.2, Some(817), "B2 af_info mirror hall");
+		}
+		let lri = crate::LriFile::decode(&bytes).expect("decode");
+		assert_eq!(lri.fusion.mirror_hall_codes.get(&CameraId::B2), Some(&817));
+		assert_eq!(lri.fusion.mirror_hall_codes.get(&CameraId::B3), Some(&824));
+		if let Some(b3) = b3 {
+			assert!(
+				b3.2.is_some(),
+				"B3 mirror_position expected in af_info: top={:?} af={:?}",
+				b3.1,
+				b3.2
+			);
+		}
+		if let Some(b1) = b1 {
+			assert!(
+				b1.1.is_some() || b1.2.is_some(),
+				"B1 should have mirror hall somewhere"
+			);
+		}
+	}
 }

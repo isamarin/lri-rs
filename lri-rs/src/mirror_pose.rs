@@ -179,14 +179,10 @@ fn reflection_matrix(n: [f64; 3]) -> [[f64; 3]; 3] {
 	]
 }
 
+/// `libcp` `0x1c78b8`: negate the second row of R (image flip around horizontal axis).
 fn flip_x_mat(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
 	let mut out = m;
-	out[0][1] = -out[0][1];
-	out[0][2] = -out[0][2];
-	out[1][1] = -out[1][1];
-	out[1][2] = -out[1][2];
-	out[2][1] = -out[2][1];
-	out[2][2] = -out[2][2];
+	out[1] = [-out[1][0], -out[1][1], -out[1][2]];
 	out
 }
 
@@ -342,6 +338,19 @@ mod tests {
 			hall_code_range: None,
 		};
 		assert!(hall_code_to_mirror_angle_deg(100, &mapping).is_none());
+	}
+
+	#[test]
+	fn flip_x_mat_negates_second_row() {
+		let m = [
+			[1.0, 2.0, 3.0],
+			[4.0, 5.0, 6.0],
+			[7.0, 8.0, 9.0],
+		];
+		let f = flip_x_mat(m);
+		assert_eq!(f[0], [1.0, 2.0, 3.0]);
+		assert_eq!(f[1], [-4.0, -5.0, -6.0]);
+		assert_eq!(f[2], [7.0, 8.0, 9.0]);
 	}
 
 	#[test]
