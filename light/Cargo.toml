@@ -1,0 +1,22 @@
+[package]
+name = "light"
+version.workspace = true
+edition.workspace = true
+description = "Light L16 LRI tooling — survey and extract"
+default-run = "light"
+
+[[bin]]
+name = "light"
+path = "src/main.rs"
+
+[dependencies]
+lri-rs = { path = "../lri-rs" }
+clap = { version = "4.5", features = ["derive"] }
+camino = "1.1"
+owo-colors = "4.1"
+rayon = "1.10"
+png = "0.17"
+rawproc = { git = "https://github.com/eclecticnybles/gaze" }
+rawloader = "0.37"
+nalgebra = "0.31"
+anyhow = "1.0"
