@@ -6,6 +6,7 @@ use camino::Utf8Path;
 use lri_rs::LriFile;
 use rayon::prelude::*;
 
+use crate::fusion_sidecar;
 use crate::render;
 use crate::session::LriSession;
 use crate::threads;
@@ -68,6 +69,9 @@ fn run_decoded(
 		on_progress(n, total, &img.camera.to_string());
 		Ok::<(), anyhow::Error>(())
 	})?;
+
+	fusion_sidecar::write_json(lri, &output.join("fusion.json"))?;
+	eprintln!("wrote {}", output.join("fusion.json"));
 
 	Ok(())
 }

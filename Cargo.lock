@@ -1976,6 +1976,7 @@ dependencies = [
  "rawproc",
  "rayon",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ mod bayer_jpeg;
 mod block;
 mod error;
 mod fusion;
+mod mirror_pose;
 mod types;
 pub mod unpack;
 

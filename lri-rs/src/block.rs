@@ -126,6 +126,9 @@ impl<'lri> Block<'lri> {
 
 		for mut module in modules {
 			let camera = module.id().into();
+			if let Some(hall) = module.mirror_position {
+				ext.fusion.mirror_hall_codes.insert(camera, hall);
+			}
 			let mut surface = match module.sensor_data_surface.take() {
 				Some(sur) => sur,
 				None => continue,

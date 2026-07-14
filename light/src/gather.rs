@@ -5,7 +5,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use lri_rs::{AwbMode, DataFormat, HdrMode, LriFile, MirrorType, SceneMode, SensorModel};
+use lri_rs::{
+	AwbMode, DataFormat, HdrMode, LriFile, MirrorType, SceneMode, SensorModel,
+	target_intrinsics_focus_distance,
+};
 use owo_colors::OwoColorize;
 
 pub fn run(data_dir: &Utf8Path) -> Result<()> {
@@ -158,8 +161,15 @@ pub fn run(data_dir: &Utf8Path) -> Result<()> {
 			.iter()
 			.filter(|m| m.mirror_type == Some(MirrorType::Movable))
 			.count();
-		if movable > 0 {
-			print!(" mir:{movable}");
+		let mir_sys = fus.modules_with_mirror_system();
+		if movable > 0 || mir_sys > 0 {
+			print!(" mir:{movable} mir_sys:{mir_sys}");
+		}
+		if let Some(focal) = lri.focal_length {
+			let target = target_intrinsics_focus_distance(focal);
+			let picks = fus.pick_all_focus_bundles(focal);
+			let with_rt = picks.iter().filter(|(_, s)| s.has_extrinsics).count();
+			print!(" focus:{focal}→{target:.0} pick:{}/{} K+Rt:{}", picks.len(), fus.geometry_module_count(), with_rt);
 		}
 		if let Some(tof) = fus.tof_range_m {
 			print!(" tof:{tof:.2}");

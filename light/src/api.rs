@@ -33,6 +33,7 @@ pub struct FusionSummary {
 	pub geometry_modules: usize,
 	pub modules_with_intrinsics: usize,
 	pub movable_mirror_modules: usize,
+	pub modules_with_mirror_system: usize,
 	pub tof_range_m: Option<f32>,
 	pub imu_frames: Option<usize>,
 	pub has_gps: bool,
@@ -145,6 +146,7 @@ fn fusion_summary(lri: &LriFile<'_>) -> FusionSummary {
 			.iter()
 			.filter(|m| m.mirror_type == Some(MirrorType::Movable))
 			.count(),
+		modules_with_mirror_system: fusion.modules_with_mirror_system(),
 		tof_range_m: fusion.tof_range_m,
 		imu_frames: fusion.imu.as_ref().map(|i| i.frames),
 		has_gps: fusion.gps.is_some(),
