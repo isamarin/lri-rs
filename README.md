@@ -2,6 +2,8 @@
 
 Rust workspace for **Light L16** `.lri` (Light Raw Image) files — parse, survey, and export per-camera RAW.
 
+Fork maintained by **isamarin × BLMK**.
+
 ## Quick start
 
 ```bash
@@ -11,7 +13,7 @@ make release
 # Survey a folder of captures
 ./target/release/light gather /path/to/photos/
 
-# Extract all camera modules to PNG (parallel)
+# Extract all camera modules to DNG (parallel)
 ./target/release/light extract photo.lri ./output/ --jobs 8
 ```
 
@@ -21,12 +23,21 @@ Install globally:
 make install   # → ~/.cargo/bin/light
 ```
 
+### Desktop GUI (Tauri 2)
+
+```bash
+make lumen-release
+./target/release/lumen
+```
+
+For live reload during UI work, install the Tauri CLI once (`cargo install tauri-cli`) and run `cargo tauri dev` from `lumen/src-tauri`.
+
 ## `light` CLI
 
 | Command | Description |
 | ------- | ----------- |
 | `light gather <dir>` | Metadata report for every `.lri` in a directory |
-| `light extract <lri> <out> [--jobs N]` | Per-camera PNG export (rayon-parallel) |
+| `light extract <lri> <out> [--jobs N]` | Per-camera DNG export (rayon-parallel) |
 
 Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in workspace).
 
@@ -37,6 +48,7 @@ Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in
 | **lri-rs** | Library — `LriFile::decode()`, `RawImage::decode_pixels()` |
 | **lri-proto** | Protobuf types ([dllu/lri-rs](https://github.com/dllu/lri-rs) / Lumen) |
 | **light** | CLI tool |
+| **lumen** | Tauri 2 desktop GUI |
 
 ## Documentation
 
@@ -66,7 +78,7 @@ This fork is set up for fast native builds on M-series Macs:
 | `release-fast` profile | Thin LTO for quicker iteration (`make release-fast`) |
 | Zero-copy block parse | `lri-rs` keeps slices into input buffer |
 | Allocation-free 10 bpp unpack | reads packed RAW backwards in-place |
-| Parallel PNG export | `rayon` in `light extract` |
+| Parallel DNG export | `rayon` in `light extract` |
 
 Benchmark 10 bpp unpack:
 
@@ -81,16 +93,22 @@ make bench
 | Block parse with error handling | Yes |
 | Packed 10 bpp unpack | Yes |
 | Bayer JPEG decode → pixels | Yes |
-| PNG export (both RAW formats) | Yes |
+| DNG export (both RAW formats) | Yes |
+| GUI thumbnails + drag-drop + export progress | Yes (`lumen`) |
 | `sensor_data` black/white levels | Yes (via `levels_for`) |
 | GPS / IMU / geometry | Proto only |
-| DNG export | Planned |
 
 ## Resources
 
 - [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive) — firmware, root, archived L16 tooling
 
+## Credits
+
+- Original parser & docs — [gennyble](https://github.com/nyble) / [dllu/lri-rs](https://github.com/dllu/lri-rs)
+- This fork — **isamarin × BLMK**
+
 ## Licensing
 
 - `lri-proto` — MIT, Daniel Lawrence Lu
-- Everything else — ISC, gennyble \<gen@nyble.dev\>
+- Upstream crates (`lri-rs`, `light`, …) — ISC, gennyble \<gen@nyble.dev\>
+- Fork changes — isamarin × BLMK
