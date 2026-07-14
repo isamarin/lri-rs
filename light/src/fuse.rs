@@ -11,8 +11,12 @@ use lri_rs::{
 use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
 
+use crate::dng;
+use crate::fuse_export::{apply_view_output, gray8_to_u16};
 use crate::session::LriSession;
 use crate::thumbnail;
+use crate::tiff_out;
+use lri_rs::ViewOutput;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FuseSummary {
@@ -27,6 +31,10 @@ pub struct FuseSummary {
 	pub depth_ncc_vs_lumen: Option<f64>,
 	pub modules_warped: usize,
 	pub preview_max_side: u32,
+	pub full_res: bool,
+	pub canvas: [u32; 2],
+	pub crop_rect: [u32; 4],
+	pub exports: Vec<String>,
 }
 
 pub fn run(
@@ -34,6 +42,9 @@ pub fn run(
 	output: &Utf8Path,
 	lumen_jpg: Option<&Utf8Path>,
 	max_side: u32,
+	full_res: bool,
+	export_tiff: bool,
+	export_dng: bool,
 	depth_min_mm: f64,
 	depth_max_mm: f64,
 	depth_steps: usize,
@@ -45,6 +56,9 @@ pub fn run(
 			output,
 			lumen_jpg,
 			max_side,
+			full_res,
+			export_tiff,
+			export_dng,
 			depth_min_mm,
 			depth_max_mm,
 			depth_steps,
@@ -57,10 +71,19 @@ fn run_decoded(
 	output: &Utf8Path,
 	lumen_jpg: Option<&Utf8Path>,
 	max_side: u32,
+	full_res: bool,
+	export_tiff: bool,
+	export_dng: bool,
 	depth_min_mm: f64,
 	depth_max_mm: f64,
 	depth_steps: usize,
 ) -> Result<()> {
+	let canvas = ViewOutput::LUMEN_CANVAS;
+	let fuse_max_side = if full_res {
+		canvas.0.max(canvas.1)
+	} else {
+		max_side
+	};
 	if !output.exists() {
 		fs::create_dir_all(output).context("create output directory")?;
 	}
@@ -94,7 +117,7 @@ fn run_decoded(
 		.context("reference pick")?;
 
 	let (ref_bytes, ref_w, ref_h, ref_step) =
-		thumbnail::render_preview_gray(lri, ref_cam, max_side)?;
+		thumbnail::render_preview_gray(lri, ref_cam, fuse_max_side)?;
 	let ref_pose = pose_from_pick(ref_pick, ref_step);
 
 	let ref_undist = undistort_preview(
@@ -117,7 +140,8 @@ fn run_decoded(
 		.find(|m| m.camera == tele.0)
 		.context("tele geometry")?;
 
-	let (tele_bytes, tw, th, tele_step) = thumbnail::render_preview_gray(lri, tele.0, max_side)?;
+	let (tele_bytes, tw, th, tele_step) =
+		thumbnail::render_preview_gray(lri, tele.0, fuse_max_side)?;
 	let tele_pose = pose_from_pick(&tele.1, tele_step);
 	let tele_undist = undistort_preview(&tele_bytes, tw, th, &tele_module.distortion,)?;
 	let tele_img = bytes_to_gray(&tele_undist, tw, th);
@@ -168,7 +192,8 @@ fn run_decoded(
 		if *camera == ref_cam {
 			continue;
 		}
-		let (bytes, sw, sh, step) = thumbnail::render_preview_gray(lri, *camera, max_side)?;
+		let (bytes, sw, sh, step) =
+			thumbnail::render_preview_gray(lri, *camera, fuse_max_side)?;
 		let module = lri
 			.fusion
 			.module_geometry
@@ -185,8 +210,55 @@ fn run_decoded(
 	}
 
 	let fused = normalize_blend(&blend_acc, &blend_w, ref_w, ref_h);
+
+	let canvas_img = if full_res && (fused.width(), fused.height()) != canvas {
+		image::imageops::resize(&fused, canvas.0, canvas.1, FilterType::Triangle)
+	} else {
+		fused.clone()
+	};
+	let cropped = apply_view_output(canvas_img, &lri.view_output, canvas);
+	let (cx, cy, cw, ch) = lri.view_output.crop_rect_px(canvas);
+
 	let fused_path = output.join("fused.png");
 	fused.save(&fused_path).context("write fused.png")?;
+
+	let mut exports = vec!["fused.png".to_string()];
+	if full_res {
+		let cropped_path = output.join("fused_cropped.png");
+		cropped.save(&cropped_path).context("write fused_cropped.png")?;
+		exports.push("fused_cropped.png".to_string());
+	}
+
+	let ref_img_meta = lri
+		.images
+		.iter()
+		.find(|i| i.camera == ref_cam)
+		.context("reference image")?;
+	let (black, white) = lri.levels_for(ref_img_meta.sensor);
+	let u16 = gray8_to_u16(&cropped, black, white);
+
+	if full_res && export_tiff {
+		let path = output.join("fused.tiff");
+		tiff_out::write_gray_tiff16(&path, cropped.width(), cropped.height(), &u16)?;
+		exports.push("fused.tiff".to_string());
+		eprintln!("wrote {path} ({}×{})", cropped.width(), cropped.height());
+	}
+	if full_res && export_dng {
+		let path = output.join("fused.dng");
+		dng::write_dng(
+			&path,
+			cropped.width(),
+			cropped.height(),
+			&u16,
+			None,
+			black,
+			white,
+			None,
+			"Luminat-fused",
+		)?;
+		exports.push("fused.dng".to_string());
+		eprintln!("wrote {path}");
+	}
 
 	let depth_ncc = lumen_fit
 		.as_ref()
@@ -211,7 +283,11 @@ fn run_decoded(
 		infinity_ncc_vs_lumen: infinity_ncc,
 		depth_ncc_vs_lumen: depth_ncc,
 		modules_warped: warped_count + 1,
-		preview_max_side: max_side,
+		preview_max_side: fuse_max_side,
+		full_res,
+		canvas: [canvas.0, canvas.1],
+		crop_rect: [cx, cy, cw, ch],
+		exports,
 	};
 
 	fs::write(
@@ -393,6 +469,9 @@ mod tests {
 			tmp.as_path().try_into().expect("utf8"),
 			Some(lumen_path.as_path().try_into().expect("utf8")),
 			256,
+			false,
+			false,
+			false,
 			1500.0,
 			8000.0,
 			11,

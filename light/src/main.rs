@@ -36,7 +36,7 @@ enum Command {
 		#[arg(long, default_value_t = 1024)]
 		max_side: u32,
 	},
-	/// Phase-3 MVP: undistort, plane-sweep depth, depth-guided warp, blend
+	/// Luminat fuse: undistort, depth warp, blend; optional full-res TIFF/DNG + crop
 	Fuse {
 		#[arg(long)]
 		lri: camino::Utf8PathBuf,
@@ -44,8 +44,16 @@ enum Command {
 		output: camino::Utf8PathBuf,
 		#[arg(long)]
 		lumen: Option<camino::Utf8PathBuf>,
+		/// Preview longest side (ignored when --full-res)
 		#[arg(long, default_value_t = 1024)]
 		max_side: u32,
+		/// Fuse at Lumen canvas (10432×7824) and export 16-bit TIFF/DNG with crop
+		#[arg(long)]
+		full_res: bool,
+		#[arg(long, default_value_t = true)]
+		export_tiff: bool,
+		#[arg(long, default_value_t = true)]
+		export_dng: bool,
 		#[arg(long, default_value_t = 1500.0)]
 		depth_min_mm: f64,
 		#[arg(long, default_value_t = 8000.0)]
@@ -81,6 +89,9 @@ fn main() -> Result<()> {
 			output,
 			lumen,
 			max_side,
+			full_res,
+			export_tiff,
+			export_dng,
 			depth_min_mm,
 			depth_max_mm,
 			depth_steps,
@@ -89,6 +100,9 @@ fn main() -> Result<()> {
 			&output,
 			lumen.as_deref(),
 			max_side,
+			full_res,
+			export_tiff,
+			export_dng,
 			depth_min_mm,
 			depth_max_mm,
 			depth_steps,

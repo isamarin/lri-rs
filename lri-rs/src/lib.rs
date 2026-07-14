@@ -39,6 +39,7 @@ pub struct LriFile<'lri> {
 	pub awb_gain: Option<AwbGain>,
 
 	pub fusion: FusionMeta,
+	pub view_output: ViewOutput,
 }
 
 impl<'lri> LriFile<'lri> {
@@ -104,6 +105,7 @@ impl<'lri> LriFile<'lri> {
 			awb: ext.awb,
 			awb_gain: ext.awb_gain,
 			fusion: ext.fusion,
+			view_output: ext.view_output,
 		})
 	}
 

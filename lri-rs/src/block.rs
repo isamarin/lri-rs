@@ -7,7 +7,8 @@ use lri_proto::{
 
 use crate::{
 	error::LriError, fusion, AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat,
-	FusionMeta, HdrMode, RawData, RawImage, SceneMode, SensorData, SensorModel,
+	FusionMeta, HdrMode, RawData, RawImage, SceneMode, SensorData, SensorModel, ViewCrop,
+	ViewOutput,
 };
 
 pub(crate) struct Block<'lri> {
@@ -293,6 +294,10 @@ impl<'lri> Block<'lri> {
 			is_on_tripod,
 			awb_mode,
 			awb_gains,
+			disable_cropping,
+			orientation,
+			aspect_ratio,
+			crop,
 			..
 		} = vp;
 
@@ -323,6 +328,24 @@ impl<'lri> Block<'lri> {
 		if let Some(gain) = awb_gains.into_option() {
 			ext.awb_gain = Some(gain.into());
 		}
+
+		if let Some(disable) = disable_cropping {
+			ext.view_output.disable_cropping = disable;
+		}
+		if let Some(Ok(o)) = orientation.map(|v| v.enum_value()) {
+			ext.view_output.orientation = Some(o.into());
+		}
+		if let Some(Ok(ar)) = aspect_ratio.map(|v| v.enum_value()) {
+			ext.view_output.aspect_ratio = Some(ar.into());
+		}
+		if let Some(c) = crop.into_option() {
+			if let (Some(start), Some(size)) = (c.start.into_option(), c.size.into_option()) {
+				ext.view_output.crop = Some(ViewCrop {
+					start: [start.x.unwrap_or(0.0), start.y.unwrap_or(0.0)],
+					size: [size.x.unwrap_or(0.0), size.y.unwrap_or(0.0)],
+				});
+			}
+		}
 	}
 }
 
@@ -345,6 +368,7 @@ pub(crate) struct ExtractedData {
 	pub sensor_data: Vec<SensorData>,
 
 	pub fusion: FusionMeta,
+	pub view_output: ViewOutput,
 }
 
 pub enum Message {
@@ -412,6 +436,25 @@ fn mirror_hall_from_module(module: &lri_proto::camera_module::CameraModule) -> O
 mod tests {
 	use super::*;
 	use lri_proto::{lightheader::LightHeader, Message as PbMessage};
+
+	#[test]
+	fn l16_view_crop_extracted_when_fixture_present() {
+		let Some(bytes) = crate::fixtures::l16_00078_bytes() else {
+			return;
+		};
+		let lri = crate::LriFile::decode(&bytes).expect("decode");
+		let vo = &lri.view_output;
+		eprintln!(
+			"view_output: disable_cropping={} orientation={:?} crop={:?}",
+			vo.disable_cropping, vo.orientation, vo.crop
+		);
+		// L16_00078 Lumen export is 10432×7824; crop should match when present.
+		if vo.crop.is_some() {
+			let (x, y, w, h) = vo.crop_rect_px(ViewOutput::LUMEN_CANVAS);
+			eprintln!("crop px on lumen canvas: {x},{y} {w}x{h}");
+			assert_eq!((x, y, w, h), (0, 0, 10432, 7824));
+		}
+	}
 
 	fn all_light_headers(bytes: &[u8]) -> Vec<LightHeader> {
 		let mut out = Vec::new();

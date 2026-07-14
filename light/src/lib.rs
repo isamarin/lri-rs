@@ -2,6 +2,8 @@ pub mod api;
 pub mod dng;
 pub mod extract;
 pub mod fuse;
+pub mod fuse_export;
+pub mod tiff_out;
 pub mod fusion_sidecar;
 pub mod gather;
 pub mod render;

@@ -213,6 +213,111 @@ impl From<lri_proto::view_preferences::view_preferences::AWBMode> for AwbMode {
 	}
 }
 
+/// EXIF-style orientation from `ViewPreferences.orientation`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Orientation {
+	Normal,
+	Rot90Cw,
+	Rot90Ccw,
+	Rot90CwVflip,
+	Rot90CcwVflip,
+	Vflip,
+	Hflip,
+	Rot180,
+}
+
+impl From<lri_proto::view_preferences::view_preferences::Orientation> for Orientation {
+	fn from(o: lri_proto::view_preferences::view_preferences::Orientation) -> Self {
+		use lri_proto::view_preferences::view_preferences::Orientation as Pb;
+		match o {
+			Pb::ORIENTATION_NORMAL => Self::Normal,
+			Pb::ORIENTATION_ROT90_CW => Self::Rot90Cw,
+			Pb::ORIENTATION_ROT90_CCW => Self::Rot90Ccw,
+			Pb::ORIENTATION_ROT90_CW_VFLIP => Self::Rot90CwVflip,
+			Pb::ORIENTATION_ROT90_CCW_VFLIP => Self::Rot90CcwVflip,
+			Pb::ORIENTATION_VFLIP => Self::Vflip,
+			Pb::ORIENTATION_HFLIP => Self::Hflip,
+			Pb::ORIENTATION_ROT180 => Self::Rot180,
+		}
+	}
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AspectRatio {
+	Ratio4_3,
+	Ratio16_9,
+}
+
+impl From<lri_proto::view_preferences::view_preferences::AspectRatio> for AspectRatio {
+	fn from(a: lri_proto::view_preferences::view_preferences::AspectRatio) -> Self {
+		use lri_proto::view_preferences::view_preferences::AspectRatio as Pb;
+		match a {
+			Pb::ASPECT_RATIO_4_3 => Self::Ratio4_3,
+			Pb::ASPECT_RATIO_16_9 => Self::Ratio16_9,
+		}
+	}
+}
+
+/// Crop rectangle from `ViewPreferences.crop` (pixel coords on Lumen output canvas).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ViewCrop {
+	pub start: [f32; 2],
+	pub size: [f32; 2],
+}
+
+/// Output framing from `ViewPreferences` (crop, orientation, aspect).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ViewOutput {
+	pub crop: Option<ViewCrop>,
+	pub orientation: Option<Orientation>,
+	pub disable_cropping: bool,
+	pub aspect_ratio: Option<AspectRatio>,
+}
+
+impl ViewOutput {
+	/// Lumen desktop default super-res canvas (verified L16_00078 export).
+	pub const LUMEN_CANVAS: (u32, u32) = (10432, 7824);
+
+	pub fn effective_crop(&self) -> Option<ViewCrop> {
+		if self.disable_cropping {
+			return None;
+		}
+		self.crop
+	}
+
+	fn crop_is_normalized(crop: &ViewCrop) -> bool {
+		crop.start[0] <= 1.0
+			&& crop.start[1] <= 1.0
+			&& crop.size[0] <= 1.0
+			&& crop.size[1] <= 1.0
+	}
+
+	/// Pixel crop rect clamped to `canvas`, or full frame when cropping disabled.
+	pub fn crop_rect_px(&self, canvas: (u32, u32)) -> (u32, u32, u32, u32) {
+		let (cw, ch) = canvas;
+		let Some(crop) = self.effective_crop() else {
+			return (0, 0, cw, ch);
+		};
+		let (x0f, y0f, wf, hf) = if Self::crop_is_normalized(&crop) {
+			(
+				crop.start[0] * cw as f32,
+				crop.start[1] * ch as f32,
+				crop.size[0] * cw as f32,
+				crop.size[1] * ch as f32,
+			)
+		} else {
+			(crop.start[0], crop.start[1], crop.size[0], crop.size[1])
+		};
+		let x0 = x0f.round().max(0.0) as u32;
+		let y0 = y0f.round().max(0.0) as u32;
+		let w = wf.round().max(1.0) as u32;
+		let h = hf.round().max(1.0) as u32;
+		let w = w.min(cw.saturating_sub(x0));
+		let h = h.min(ch.saturating_sub(y0));
+		(x0, y0, w, h)
+	}
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AwbGain {
 	pub r: f32,
