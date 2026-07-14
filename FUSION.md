@@ -7,6 +7,10 @@ Add findings in small PRs; link code paths and protos; mark confidence.
 **Status:** research / incremental extraction  
 **Last updated:** 2026-07-14
 
+**L16 archive (submodule):** [`vendor/light-l16`](vendor/light-l16) → [github.com/isamarin/light-l16](https://github.com/isamarin/light-l16)
+
+Clone with submodules: `git clone --recurse-submodules …` or `git submodule update --init`.
+
 ---
 
 ## Goal
@@ -140,18 +144,26 @@ Open questions — fill in when confirmed:
 
 | Resource | Notes |
 | -------- | ----- |
-| [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive) | Firmware 1.3.5.1, Lumen app archive, hardware diagrams — **no open fusion source** |
+| **[isamarin/light-l16](https://github.com/isamarin/light-l16)** | **Git submodule** at [`vendor/light-l16/`](vendor/light-l16/) — maintained L16 archive (fork of helloavo) |
+| [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive) | Upstream archive; isamarin fork is the working copy in this repo |
+| [isamarin/lri-rs](https://github.com/isamarin/lri-rs) | This decoder / GUI / fusion R&D repo |
 | [dllu/lri-rs](https://github.com/dllu/lri-rs) / [gennyble/lri-rs](https://github.com/gennyble/lri-rs) | Proto extraction basis |
 | [LRI.md](LRI.md) | Container format |
 | [bayer_jpeg.md](bayer_jpeg.md) | BJPG decode |
-| Light L16 Discord (linked from archive) | Owner reports, firmware |
+| Light L16 Discord (linked from archive README) | Owner reports, firmware |
 | Wayback [light.co/camera](https://web.archive.org/web/20191222062257/https://light.co/camera) | Marketing / spec claims |
 
-### Archive subfolders to mine (agents: check these)
+### `vendor/light-l16/` — subfolders to mine (agents: check these)
 
-- `Lumen/` — desktop app binaries, maybe symbols
-- `Guides/` — blog clone, photography notes
-- `Hardware/` — exploded view, sensor layout
+| Path | Contents | Fusion relevance |
+| ---- | -------- | ---------------- |
+| [`Lumen/`](vendor/light-l16/Lumen/) | Desktop app binaries | Reverse-engineer combine pipeline, shaders, strings |
+| [`Hardware/`](vendor/light-l16/Hardware/) | Exploded view, sensor layout | Physical module positions vs `GeometricCalibration` |
+| [`Guides/`](vendor/light-l16/Guides/) | L16 photography blog clone | Capture behaviour, marketing claims |
+| [`APKs/`](vendor/light-l16/APKs/) | Camera / Gallery apps | On-device processing hints |
+| [`L16 Lightroom Preset/`](vendor/light-l16/L16%20Lightroom%20Preset/) | Colour presets | Post-fusion look (not geometry) |
+
+Firmware **1.3.5.1** — see archive README; release assets may be on [helloavo releases](https://github.com/helloavo/Light-L16-Archive/releases/tag/1.3.5.1) until mirrored in isamarin fork.
 
 ---
 
@@ -160,10 +172,11 @@ Open questions — fill in when confirmed:
 When working on fusion:
 
 1. Read this file + [`LRI.md`](LRI.md) + relevant `.proto`.
-2. Prefer **extract → unit test on real `.lri`** → document finding here.
-3. Add a row to the tables above with **confidence**: `confirmed` / `likely` / `guess`.
-4. Link PRs and file paths; keep prose short.
-5. Do not block DNG/export work on fusion — land extractions incrementally.
+2. Check **`vendor/light-l16/`** for hardware docs, Lumen binaries, guides — cite paths as `vendor/light-l16/...`.
+3. Prefer **extract → unit test on real `.lri`** → document finding here.
+4. Add a row to the tables above with **confidence**: `confirmed` / `likely` / `guess`.
+5. Link PRs and file paths; keep prose short.
+6. Do not block DNG/export work on fusion — land extractions incrementally.
 
 ### Entry template
 
@@ -204,6 +217,14 @@ When working on fusion:
 **Finding:** Per-module `GeometricCalibration` (K/R/t per focus bundle, mirror type, distortion flags), shot `tof_range`, factory ToF cal, IMU sample counts, GPS fix now populate `LriFile.fusion`.  
 **Implication:** First real `.lri` can validate whether all 16 modules ship geometry.  
 **Follow-up:** Dump nearest focus bundle for `image_focal_length`; JSON sidecar export.
+
+### 2026-07-14 — light-l16 archive as git submodule
+
+**Confidence:** confirmed  
+**Source:** `vendor/light-l16/`, [github.com/isamarin/light-l16](https://github.com/isamarin/light-l16)  
+**Finding:** Fork of helloavo/Light-L16-Archive vendored at `vendor/light-l16/` (APKs, Guides, Hardware, Lumen desktop, Lightroom presets). Primary offline reference for RE and fusion archaeology.  
+**Implication:** Agents and humans should search the submodule before the web; pin findings to paths under `vendor/light-l16/`.  
+**Follow-up:** Mirror firmware 1.3.5.1 release in isamarin fork; strings/symbols pass on `vendor/light-l16/Lumen/`.
 
 ### 2026-07-14 — Purchase checklist (offline pipeline)
 

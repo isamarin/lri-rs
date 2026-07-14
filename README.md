@@ -142,7 +142,16 @@ make bench    # tenbit unpack benchmark
 
 ## Resources
 
-- [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive) — firmware 1.3.5.1, Lumen app archive, hardware diagrams
+- [`vendor/light-l16/`](vendor/light-l16/) — git submodule, [isamarin/light-l16](https://github.com/isamarin/light-l16) (L16 archive: firmware notes, Lumen app, hardware, guides)
+- [FUSION.md](FUSION.md) — submodule paths and fusion research log
+
+Clone:
+
+```bash
+git clone --recurse-submodules https://github.com/isamarin/lri-rs.git
+# or after clone:
+git submodule update --init
+```
 
 ## Credits
 
