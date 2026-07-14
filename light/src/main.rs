@@ -5,8 +5,8 @@ use light::{extract, fuse, gather, validate_rt};
 #[derive(Parser)]
 #[command(
 	name = "light",
-	about = "Light L16 LRI tooling",
-	long_about = "Light L16 LRI tooling — isamarin × BLMK",
+	about = "Luminat — Light L16 fusion tooling",
+	long_about = "Luminat — open 16→1 fusion for Light L16 (.lri decode, warp, blend). isamarin × BLMK",
 	version
 )]
 struct Cli {

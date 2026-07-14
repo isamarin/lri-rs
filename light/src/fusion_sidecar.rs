@@ -233,7 +233,7 @@ fn fusion_detail(fusion: &FusionMeta) -> FusionDetail {
 				has_vignetting: m.has_vignetting,
 				distortion: DistortionJson {
 					polynomial: m.distortion.has_polynomial(),
-					cra: m.distortion.has_cra,
+					cra: m.distortion.has_cra(),
 					poly_coeffs: m.distortion.poly_coeffs(),
 				},
 				focus_calibrations: m

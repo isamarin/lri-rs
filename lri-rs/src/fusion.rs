@@ -688,8 +688,19 @@ pub(crate) fn extract_module_geometry(
 				});
 			}
 		}
-		if dist.cra.is_some() {
-			distortion.has_cra = true;
+		if let Some(cra) = dist.cra.as_ref() {
+			if let Some(center) = cra.distortion_center.as_ref() {
+				distortion.cra = Some(crate::distortion::CraDistortion {
+					center: point2f(center.clone()),
+					sensor_distance: cra.sensor_distance(),
+					exit_pupil_distance: cra.exit_pupil_distance(),
+					pixel_size: cra.pixel_size(),
+					cra_profile: cra.cra.iter().map(|p| point2f(p.clone())).collect(),
+					corr_lut: cra.coeffs.iter().map(|p| point2f(p.clone())).collect(),
+					lens_hall_code: cra.lens_hall_code,
+					distance_hall_ratio: cra.distance_hall_ratio,
+				});
+			}
 		}
 	}
 

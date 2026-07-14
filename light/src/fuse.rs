@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use camino::Utf8Path;
 use image::{imageops::FilterType, GrayImage, ImageBuffer, Luma};
 use lri_rs::{
-	distortion::undistort_gray,
+	distortion::undistort_module_gray,
 	stereo::{ncc_overlap, plane_sweep, warp_homography},
 	CameraId, CameraPose, LriFile, ModuleDistortion, SelectedFocusBundle,
 };
@@ -16,6 +16,7 @@ use crate::thumbnail;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FuseSummary {
+	pub producer: String,
 	pub reference_camera: String,
 	pub depth_plane_mm: f64,
 	pub depth_sweep_score: f64,
@@ -96,7 +97,7 @@ fn run_decoded(
 		thumbnail::render_preview_gray(lri, ref_cam, max_side)?;
 	let ref_pose = pose_from_pick(ref_pick, ref_step);
 
-	let ref_undist = undistort_module_gray(
+	let ref_undist = undistort_preview(
 		&ref_bytes,
 		ref_w,
 		ref_h,
@@ -118,7 +119,7 @@ fn run_decoded(
 
 	let (tele_bytes, tw, th, tele_step) = thumbnail::render_preview_gray(lri, tele.0, max_side)?;
 	let tele_pose = pose_from_pick(&tele.1, tele_step);
-	let tele_undist = undistort_module_gray(&tele_bytes, tw, th, &tele_module.distortion,)?;
+	let tele_undist = undistort_preview(&tele_bytes, tw, th, &tele_module.distortion,)?;
 	let tele_img = bytes_to_gray(&tele_undist, tw, th);
 
 	let tof_range_m = lri.fusion.tof_range_m.filter(|t| *t > 0.0);
@@ -175,7 +176,7 @@ fn run_decoded(
 			.find(|m| m.camera == *camera)
 			.context("module geometry")?;
 		let src_pose = pose_from_pick(sel, step);
-		let undist = undistort_module_gray(&bytes, sw, sh, &module.distortion,)?;
+		let undist = undistort_preview(&bytes, sw, sh, &module.distortion,)?;
 		let src_img = bytes_to_gray(&undist, sw, sh);
 		let h = warp_homography(&src_pose, &ref_pose, best_depth);
 		let warped = warp_gray(&src_img, &h, ref_w, ref_h);
@@ -200,6 +201,7 @@ fn run_decoded(
 	}
 
 	let summary = FuseSummary {
+		producer: "Luminat".to_string(),
 		reference_camera: ref_cam.to_string(),
 		depth_plane_mm: best_depth,
 		depth_sweep_score: best_score,
@@ -251,16 +253,17 @@ fn pose_from_pick(sel: &SelectedFocusBundle, step: usize) -> CameraPose {
 	CameraPose::from_row_major(k, r, t).scaled(step)
 }
 
-fn undistort_module_gray(
+fn undistort_preview(
 	bytes: &[u8],
 	w: u32,
 	h: u32,
 	distortion: &ModuleDistortion,
 ) -> Result<Vec<u8>> {
-	Ok(match distortion.polynomial.as_ref() {
-		Some(poly) => undistort_gray(bytes, w, h, poly),
-		None => bytes.to_vec(),
-	})
+	if distortion.has_polynomial() || distortion.has_cra() {
+		Ok(undistort_module_gray(bytes, w, h, distortion))
+	} else {
+		Ok(bytes.to_vec())
+	}
 }
 
 fn bytes_to_gray(bytes: &[u8], w: u32, h: u32) -> GrayImage {
@@ -395,13 +398,12 @@ mod tests {
 			11,
 		)
 		.expect("fuse run");
-		let summary: FuseSummary =
-			serde_json::from_str(&std::fs::read_to_string(tmp.join("fuse.json")).unwrap())
-				.unwrap();
+		let json = std::fs::read_to_string(tmp.join("fuse.json")).unwrap();
+		let summary: FuseSummary = serde_json::from_str(&json).unwrap();
 		assert_eq!(summary.reference_camera, "A1");
 		assert_eq!(summary.modules_warped, 10);
 		let ncc = summary.depth_ncc_vs_lumen.expect("depth ncc");
-		assert!(ncc > 0.3, "fused ncc should beat validate infinity blend, got {ncc}");
+		assert!(ncc > 0.45, "fused ncc should beat polynomial-only baseline, got {ncc}");
 		assert!(tmp.join("fused.png").exists());
 	}
 }
