@@ -2,8 +2,11 @@
 name = "light"
 version.workspace = true
 edition.workspace = true
-description = "Light L16 LRI tooling — survey and extract"
+description = "Light L16 LRI tooling — isamarin × BLMK"
 default-run = "light"
+
+[lib]
+path = "src/lib.rs"
 
 [[bin]]
 name = "light"
@@ -20,3 +23,5 @@ rawproc = { git = "https://github.com/eclecticnybles/gaze" }
 rawloader = "0.37"
 nalgebra = "0.31"
 anyhow = "1.0"
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"

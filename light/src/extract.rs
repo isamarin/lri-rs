@@ -1,13 +1,23 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use camino::Utf8Path;
-use lri_rs::{AwbGain, LriFile};
+use lri_rs::LriFile;
 use rayon::prelude::*;
 
 use crate::render;
 
 pub fn run(input: &Utf8Path, output: &Utf8Path, jobs: Option<usize>) -> Result<()> {
+	run_with_progress(input, output, jobs, |_, _, _| {})
+}
+
+pub fn run_with_progress(
+	input: &Utf8Path,
+	output: &Utf8Path,
+	jobs: Option<usize>,
+	on_progress: impl Fn(usize, usize, &str) + Send + Sync + 'static,
+) -> Result<()> {
 	if let Some(n) = jobs {
 		rayon::ThreadPoolBuilder::new()
 			.num_threads(n)
@@ -23,24 +33,23 @@ pub fn run(input: &Utf8Path, output: &Utf8Path, jobs: Option<usize>) -> Result<(
 	let lri = LriFile::decode(&bytes).context("decode LRI")?;
 	let lri = Arc::new(lri);
 
-	let gain = lri.awb_gain.unwrap_or(AwbGain {
-		r: 1.0,
-		gr: 1.0,
-		gb: 1.0,
-		b: 1.0,
-	});
+	let total = lri.image_count();
+	let done = AtomicUsize::new(0);
+	let on_progress = Arc::new(on_progress);
 
-	eprintln!("{} images", lri.image_count());
+	eprintln!("{total} images");
 
 	if let Some(refimg) = lri.reference_image() {
 		eprintln!("reference camera: {}", refimg.camera);
 	}
 
-	let images: Vec<_> = lri.images.iter().collect();
+	lri.images.par_iter().try_for_each(|img| {
+		let path = output.join(format!("{}.dng", img.camera));
+		render::export_dng(img, &lri, path)?;
 
-	images.par_iter().try_for_each(|img| {
-		let path = output.join(format!("{}.png", img.camera));
-		render::export_png(img, &lri, path, gain)
+		let n = done.fetch_add(1, Ordering::SeqCst) + 1;
+		on_progress(n, total, &img.camera.to_string());
+		Ok::<(), anyhow::Error>(())
 	})?;
 
 	Ok(())

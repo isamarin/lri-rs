@@ -1,12 +1,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-
-mod extract;
-mod gather;
-mod render;
+use light::{extract, gather};
 
 #[derive(Parser)]
-#[command(name = "light", about = "Light L16 LRI tooling", version)]
+#[command(
+	name = "light",
+	about = "Light L16 LRI tooling",
+	long_about = "Light L16 LRI tooling — isamarin × BLMK",
+	version
+)]
 struct Cli {
 	#[command(subcommand)]
 	command: Command,
@@ -19,7 +21,7 @@ enum Command {
 		/// Directory containing .lri / .jpg / .lris files
 		path: camino::Utf8PathBuf,
 	},
-	/// Extract per-camera PNGs from one LRI file
+	/// Extract per-camera DNGs from one LRI file
 	Extract {
 		/// Input .lri file
 		input: camino::Utf8PathBuf,
