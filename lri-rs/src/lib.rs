@@ -2,10 +2,13 @@ use std::time::Duration;
 
 use block::{Block, ExtractedData, Header};
 
+mod bayer_jpeg;
 mod block;
+mod error;
 mod types;
-mod unpack;
+pub mod unpack;
 
+pub use error::LriError;
 pub use types::*;
 
 pub struct LriFile<'lri> {
@@ -13,6 +16,7 @@ pub struct LriFile<'lri> {
 	pub images: Vec<RawImage<'lri>>,
 	pub colors: Vec<ColorInfo>,
 	pub camera_infos: Vec<CameraInfo>,
+	pub sensor_data: Vec<SensorData>,
 
 	pub focal_length: Option<i32>,
 	pub firmware_version: Option<String>,
@@ -27,55 +31,52 @@ pub struct LriFile<'lri> {
 }
 
 impl<'lri> LriFile<'lri> {
-	/// Read
-	pub fn decode(mut data: &'lri [u8]) -> Self {
+	/// Parse an LRI file. Returns an error on truncated or malformed blocks.
+	pub fn decode(data: &'lri [u8]) -> Result<Self, LriError> {
 		let mut images = vec![];
 		let mut colors = vec![];
 		let mut camera_infos = vec![];
-
 		let mut ext = ExtractedData::default();
+		let mut cursor = data;
 
-		// Read data blocks and extract informtion we care about
-		loop {
-			if data.is_empty() {
-				break;
+		while !cursor.is_empty() {
+			let header = Header::ingest(cursor)?;
+			let end = header.block_length;
+
+			if end > cursor.len() {
+				return Err(LriError::TruncatedBlock {
+					need: end,
+					have: cursor.len(),
+				});
 			}
-
-			let header = Header::ingest(&data[..]);
-			let end = header.block_length as usize;
-
-			let block_data = &data[..end];
-			data = &data[end..];
 
 			let block = Block {
 				header,
-				data: block_data,
+				data: &cursor[..end],
 			};
+			cursor = &cursor[end..];
 
-			block.extract_meaningful_data(&mut ext, &mut images, &mut colors, &mut camera_infos);
+			block.extract_meaningful_data(&mut ext, &mut images, &mut colors, &mut camera_infos)?;
 		}
 
-		// Further fill in the RawImage's we extracted
 		for img in images.iter_mut() {
 			if let Some(info) = camera_infos.iter().find(|i| i.camera == img.camera) {
 				img.sensor = info.sensor;
 			}
 
-			let profiles = colors
+			img.color = colors
 				.iter()
 				.filter(|c| c.camera == img.camera)
-				.map(<_>::clone)
+				.cloned()
 				.collect();
-
-			img.color = profiles;
 		}
 
-		LriFile {
+		Ok(LriFile {
 			image_reference_camera: ext.reference_camera,
 			images,
 			colors,
 			camera_infos,
-
+			sensor_data: ext.sensor_data,
 			firmware_version: ext.fw_version,
 			focal_length: ext.focal_length,
 			image_integration_time: ext.image_integration_time,
@@ -86,25 +87,34 @@ impl<'lri> LriFile<'lri> {
 			on_tripod: ext.on_tripod,
 			awb: ext.awb,
 			awb_gain: ext.awb_gain,
-		}
+		})
 	}
 
-	/// Number of images present in the file
 	pub fn image_count(&self) -> usize {
 		self.images.len()
 	}
 
-	/// Iterator over the images
-	pub fn images(&self) -> std::slice::Iter<'_, RawImage> {
+	pub fn images(&self) -> std::slice::Iter<'_, RawImage<'_>> {
 		self.images.iter()
 	}
 
-	/// Get the image the camera showed in the viewfinder, if it's been
-	/// recorded in the file.
-	pub fn reference_image(&self) -> Option<&RawImage> {
+	pub fn reference_image(&self) -> Option<&RawImage<'lri>> {
 		self.image_reference_camera
-			.map(|irc| self.images().find(|ri| ri.camera == irc))
-			.flatten()
+			.and_then(|irc| self.images.iter().find(|ri| ri.camera == irc))
+	}
+
+	/// Black/white levels for a sensor type, falling back to L16 AR1335 defaults.
+	pub fn levels_for(&self, sensor: SensorModel) -> (u16, u16) {
+		self.sensor_data
+			.iter()
+			.find(|sd| sd.sensor_type == sensor)
+			.map(|sd| {
+				(
+					sd.characterization.black_level.round() as u16,
+					sd.characterization.white_level.round() as u16,
+				)
+			})
+			.unwrap_or((42, 1023))
 	}
 }
 
@@ -123,25 +133,17 @@ pub enum RawData<'img> {
 }
 
 pub struct RawImage<'img> {
-	/// Camera that captured this image
 	pub camera: CameraId,
-	/// The model of the sensor of the camera
 	pub sensor: SensorModel,
-
 	pub width: usize,
 	pub height: usize,
-
-	/// What format the data is in
 	pub format: DataFormat,
 	pub data: RawData<'img>,
-	/// "sensor bayer red offset"
 	pub sbro: (i32, i32),
-	/// All color information associated with this [CameraId] for different [Whitepoint]s
 	pub color: Vec<ColorInfo>,
 }
 
 impl<'img> RawImage<'img> {
-	/// Get the color profile for noon daylight. First looks for F7 and, if it can't find that, D65
 	pub fn daylight(&self) -> Option<&ColorInfo> {
 		self.color
 			.iter()
@@ -149,25 +151,17 @@ impl<'img> RawImage<'img> {
 			.or_else(|| self.color.iter().find(|c| c.whitepoint == Whitepoint::D65))
 	}
 
-	/// Get a color profile matching the provided Whitepoint
 	pub fn color_info(&self, whitepoint: Whitepoint) -> Option<&ColorInfo> {
 		self.color.iter().find(|c| c.whitepoint == whitepoint)
 	}
 
-	/// Return a string describing the colour filter array used for this image.
-	/// `None` is returned if the sensor is monochromatic.
-	///
-	/// NOTE: The same sensor can return differing cfa patterns for different
-	/// images. This is likely due to in-camera corrected rotation.
 	pub fn cfa_string(&self) -> Option<&'static str> {
 		match self.sensor {
-			SensorModel::Ar1335Mono => None,
+			SensorModel::Ar1335Mono | SensorModel::Unknown => None,
 			SensorModel::Ar1335 => self.cfa_string_ar1335(),
-			_ => unimplemented!(),
 		}
 	}
 
-	// The AR1335 seems to be BGGR, which was weird.
 	fn cfa_string_ar1335(&self) -> Option<&'static str> {
 		match self.sbro {
 			(-1, -1) => None,
@@ -175,12 +169,10 @@ impl<'img> RawImage<'img> {
 			(1, 0) => Some("GRBG"),
 			(0, 1) => Some("GBRG"),
 			(1, 1) => Some("RGGB"),
-			_ => unreachable!(),
+			_ => None,
 		}
 	}
 
-	/// Uses the [SensorModel] to determine if the image's [ColorType].
-	/// If the sensor model is unknown, [SensorModel::Unknown], then [ColorType::Grayscale] is returned
 	pub fn color_type(&self) -> ColorType {
 		match self.sensor {
 			SensorModel::Ar1335 => ColorType::Rgb,
@@ -188,16 +180,30 @@ impl<'img> RawImage<'img> {
 		}
 	}
 
-	/// Returns the unpacked data if the DataFormat is Packed10bpp, otherwise
-	/// returns None
+	/// Unpack packed 10 bpp RAW. Returns `None` for Bayer JPEG — use [`decode_pixels`](Self::decode_pixels).
 	pub fn unpack(&self) -> Option<Vec<u16>> {
 		if let RawData::Packed10bpp { data } = self.data {
 			let count = self.width * self.height;
 			let mut upack = vec![0; count];
-			unpack::tenbit(data, count, &mut upack);
+			unpack::tenbit(data, count, &mut upack).ok()?;
 			Some(upack)
 		} else {
 			None
+		}
+	}
+
+	/// Decode sensor pixels for any supported RAW format.
+	pub fn decode_pixels(&self) -> Result<Vec<u16>, LriError> {
+		match self.data {
+			RawData::Packed10bpp { data } => {
+				let count = self.width * self.height;
+				let mut upack = vec![0; count];
+				unpack::tenbit(data, count, &mut upack)?;
+				Ok(upack)
+			}
+			RawData::BayerJpeg { .. } => {
+				bayer_jpeg::decode(&self.data, self.width, self.height)
+			}
 		}
 	}
 }
@@ -208,31 +214,17 @@ pub enum ColorType {
 }
 
 #[derive(Copy, Clone, Debug)]
-/// Colour information about the camera. Used to correct the image
 pub struct ColorInfo {
-	/// Which specific camera this image was taken by
 	pub camera: CameraId,
-
-	/// The whitepoint that the forward matrix corresponds to.
 	pub whitepoint: Whitepoint,
-
-	/// Camera RGB -> XYZ conversion matrix.
 	pub forward_matrix: [f32; 9],
-
-	/// A 3x3 Matrix with unclear usage.
-	///
-	/// If you know what this is or think you have information, PRs are accepted.
-	/// Or emails, if you'd rather. gen@nyble.dev
 	pub color_matrix: [f32; 9],
-
-	/// Red-green ratio.
 	pub rg: f32,
-	/// Blue-green ratio.
 	pub bg: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct CameraInfo {
-	camera: CameraId,
-	sensor: SensorModel,
+	pub camera: CameraId,
+	pub sensor: SensorModel,
 }

@@ -6,39 +6,34 @@ use lri_proto::{
 };
 
 use crate::{
-	AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat, HdrMode, RawData, RawImage,
-	SceneMode, SensorData, SensorModel,
+	error::LriError, AwbGain, AwbMode, CameraId, CameraInfo, ColorInfo, DataFormat, HdrMode,
+	RawData, RawImage, SceneMode, SensorData, SensorModel,
 };
 
 pub(crate) struct Block<'lri> {
 	pub header: Header,
-	/// This includes the 32 bytes that make up the header.
+	/// Includes the 32-byte header.
 	pub data: &'lri [u8],
 }
 
 impl<'lri> Block<'lri> {
-	/// Get a slice to the entire body of this block
-	pub fn body(&self) -> &[u8] {
-		&self.data[32..]
-	}
-
-	/// Get a slice to this block's messge data
 	pub fn message_data(&self) -> &[u8] {
 		let end = self.header.message_offset + self.header.message_length;
 		&self.data[self.header.message_offset..end]
 	}
 
-	/// Parse the message
-	pub fn message(&self) -> Message {
+	pub fn message(&self) -> Result<Message, LriError> {
 		match self.header.kind {
-			BlockType::LightHeader => {
-				Message::LightHeader(LightHeader::parse_from_bytes(self.message_data()).unwrap())
-			}
-			BlockType::ViewPreferences => Message::ViewPreferences(
-				ViewPreferences::parse_from_bytes(self.message_data()).unwrap(),
-			),
-			BlockType::GPSData => {
-				Message::Gps(GPSData::parse_from_bytes(self.message_data()).unwrap())
+			BlockType::LightHeader => LightHeader::parse_from_bytes(self.message_data())
+				.map(Message::LightHeader)
+				.map_err(|e| LriError::ProtobufParse(e.to_string())),
+			BlockType::ViewPreferences => ViewPreferences::parse_from_bytes(self.message_data())
+				.map(Message::ViewPreferences)
+				.map_err(|e| LriError::ProtobufParse(e.to_string())),
+			BlockType::Gps => {
+				GPSData::parse_from_bytes(self.message_data())
+					.map(|_| Message::Gps(()))
+					.map_err(|e| LriError::ProtobufParse(e.to_string()))
 			}
 		}
 	}
@@ -49,7 +44,27 @@ impl<'lri> Block<'lri> {
 		images: &mut Vec<RawImage<'lri>>,
 		colors: &mut Vec<ColorInfo>,
 		infos: &mut Vec<CameraInfo>,
-	) {
+	) -> Result<(), LriError> {
+		match self.message()? {
+			Message::ViewPreferences(vp) => {
+				self.extract_view(vp, ext);
+			}
+			Message::Gps(_) => {}
+			Message::LightHeader(lh) => {
+				self.extract_light_header(lh, ext, images, colors, infos)?;
+			}
+		}
+		Ok(())
+	}
+
+	fn extract_light_header(
+		&self,
+		lh: LightHeader,
+		ext: &mut ExtractedData,
+		images: &mut Vec<RawImage<'lri>>,
+		colors: &mut Vec<ColorInfo>,
+		infos: &mut Vec<CameraInfo>,
+	) -> Result<(), LriError> {
 		let LightHeader {
 			mut hw_info,
 			module_calibration,
@@ -57,28 +72,18 @@ impl<'lri> Block<'lri> {
 			image_reference_camera,
 			device_fw_version,
 			image_focal_length,
-			af_info,
+			mut af_info,
 			mut view_preferences,
 			sensor_data,
 			..
-		} = if let Message::LightHeader(lh) = self.message() {
-			lh
-		} else if let Message::ViewPreferences(vp) = self.message() {
-			self.extract_view(vp, ext);
-			return;
-		} else {
-			return;
-		};
+		} = lh;
 
-		// Form the CameraInfo struct for mapping CameraId to SensorType
 		if let Some(hw_info) = hw_info.take() {
 			for info in hw_info.camera {
-				let info = CameraInfo {
+				infos.push(CameraInfo {
 					camera: info.id().into(),
 					sensor: info.sensor().into(),
-				};
-
-				infos.push(info);
+				});
 			}
 		}
 
@@ -86,7 +91,6 @@ impl<'lri> Block<'lri> {
 			self.extract_view(vp, ext);
 		}
 
-		// Color information for the Camera moduels.
 		for mcal in module_calibration {
 			let camera = mcal.camera_id().into();
 
@@ -94,8 +98,6 @@ impl<'lri> Block<'lri> {
 				let whitepoint = color.type_().into();
 				let forward_matrix = match color.forward_matrix.take() {
 					Some(fw) => Self::deconstruct_matrix3x3(fw),
-					// The forward matrix is like, what we want! If we don't get it, don't bother
-					// with the struct
 					None => continue,
 				};
 				let color_matrix = match color.color_matrix.take() {
@@ -103,30 +105,28 @@ impl<'lri> Block<'lri> {
 					Some(cm) => Self::deconstruct_matrix3x3(cm),
 				};
 
-				let rg = color.rg_ratio();
-				let bg = color.bg_ratio();
-
 				colors.push(ColorInfo {
 					camera,
 					whitepoint,
 					forward_matrix,
 					color_matrix,
-					rg,
-					bg,
-				})
+					rg: color.rg_ratio(),
+					bg: color.bg_ratio(),
+				});
 			}
 		}
 
-		// The images themselves
 		for mut module in modules {
 			let camera = module.id().into();
 			let mut surface = match module.sensor_data_surface.take() {
 				Some(sur) => sur,
-				// The surface is what we're after here. Don't bother with anything lacking it
 				None => continue,
 			};
 
-			let size = surface.size.take().unwrap();
+			let size = surface
+				.size
+				.take()
+				.ok_or_else(|| LriError::ProtobufParse("missing surface size".into()))?;
 			let width = size.x() as usize;
 			let height = size.y() as usize;
 
@@ -136,62 +136,89 @@ impl<'lri> Block<'lri> {
 			let format = surface.format().into();
 			let image_data = match format {
 				DataFormat::BayerJpeg => {
-					let bjpg_header_len = 1576;
+					if offset + 24 > self.data.len() {
+						return Err(LriError::TruncatedBlock {
+							need: offset + 24,
+							have: self.data.len(),
+						});
+					}
+
+					const BJPG_HEADER_LEN: usize = 1576;
 					let mut wrk = &self.data[offset..];
 
-					let format = u32::from_le_bytes(wrk[4..8].try_into().unwrap());
-
+					let format_type = u32::from_le_bytes(wrk[4..8].try_into().unwrap());
 					let jpeg0_len = u32::from_le_bytes(wrk[8..12].try_into().unwrap()) as usize;
 					let jpeg1_len = u32::from_le_bytes(wrk[12..16].try_into().unwrap()) as usize;
 					let jpeg2_len = u32::from_le_bytes(wrk[16..20].try_into().unwrap()) as usize;
 					let jpeg3_len = u32::from_le_bytes(wrk[20..24].try_into().unwrap()) as usize;
 
-					let mut get = |len: usize| -> &[u8] {
+					let mut advance = |len: usize| -> Result<&[u8], LriError> {
+						if len > wrk.len() {
+							return Err(LriError::TruncatedBlock {
+								need: len,
+								have: wrk.len(),
+							});
+						}
 						let data = &wrk[..len];
 						wrk = &wrk[len..];
-						data
+						Ok(data)
 					};
 
-					let header = get(bjpg_header_len);
-					let jpeg0 = get(jpeg0_len);
+					let header = advance(BJPG_HEADER_LEN)?;
+					let jpeg0 = advance(jpeg0_len)?;
 
-					match format {
+					match format_type {
 						1 => RawData::BayerJpeg {
 							header,
-							format,
+							format: format_type,
 							jpeg0,
-							jpeg1: &wrk[0..0],
-							jpeg2: &wrk[0..0],
-							jpeg3: &wrk[0..0],
+							jpeg1: &[],
+							jpeg2: &[],
+							jpeg3: &[],
 						},
 						0 => RawData::BayerJpeg {
 							header,
-							format,
+							format: format_type,
 							jpeg0,
-							jpeg1: get(jpeg1_len),
-							jpeg2: get(jpeg2_len),
-							jpeg3: get(jpeg3_len),
+							jpeg1: advance(jpeg1_len)?,
+							jpeg2: advance(jpeg2_len)?,
+							jpeg3: advance(jpeg3_len)?,
 						},
-						_ => unreachable!(),
+						other => {
+							return Err(LriError::BayerJpegDecode(format!(
+								"unknown format_type {other}"
+							)));
+						}
 					}
 				}
-				DataFormat::Packed10bpp => RawData::Packed10bpp {
-					data: &self.data[offset..offset + data_length],
-				},
+				DataFormat::Packed10bpp => {
+					let end = offset + data_length;
+					if end > self.data.len() {
+						return Err(LriError::TruncatedBlock {
+							need: end,
+							have: self.data.len(),
+						});
+					}
+					RawData::Packed10bpp {
+						data: &self.data[offset..end],
+					}
+				}
 			};
 
-			let sbro = module.sensor_bayer_red_override.clone().unwrap();
+			let sbro = module
+				.sensor_bayer_red_override
+				.as_ref()
+				.map(|p| (p.x(), p.y()))
+				.unwrap_or((-1, -1));
 
 			images.push(RawImage {
 				camera,
-				// Populated after all the blocks are processed
 				sensor: SensorModel::Unknown,
 				width,
 				height,
 				format,
 				data: image_data,
-				sbro: (sbro.x(), sbro.y()),
-				// Populated after all the blocks are processed
+				sbro,
 				color: vec![],
 			});
 		}
@@ -200,7 +227,7 @@ impl<'lri> Block<'lri> {
 			ext.reference_camera = Some(irc.into());
 		}
 
-		if let Some(afd) = af_info.clone().take() {
+		if let Some(afd) = af_info.take() {
 			ext.af_achieved.get_or_insert(afd.focus_achieved());
 		}
 
@@ -213,21 +240,12 @@ impl<'lri> Block<'lri> {
 		}
 
 		for sd in sensor_data {
-			let sd: crate::SensorData = sd.into();
-			println!(
-				"black={} white={} cliff={}",
-				sd.characterization.black_level,
-				sd.characterization.white_level,
-				sd.characterization
-					.cliff_slope
-					.map(|f| f.to_string())
-					.unwrap_or_default()
-			);
-			ext.sensor_data.push(sd);
+			ext.sensor_data.push(sd.into());
 		}
+
+		Ok(())
 	}
 
-	// It kept making my neat little array very, very tall
 	#[rustfmt::skip]
 	fn deconstruct_matrix3x3(mat: Matrix3x3F) -> [f32; 9] {
 		[
@@ -301,26 +319,27 @@ pub(crate) struct ExtractedData {
 pub enum Message {
 	LightHeader(LightHeader),
 	ViewPreferences(ViewPreferences),
-	Gps(GPSData),
+	Gps(()),
 }
 
 pub struct Header {
-	/// The length of this header plus the data after it.
 	pub block_length: usize,
-	/// An offset from the start of the header to the block's protobuf message
 	pub message_offset: usize,
-	/// block's protobuf message length
 	pub message_length: usize,
-	/// The kind of protobuf message in the block
 	pub kind: BlockType,
 }
 
 impl Header {
-	pub fn ingest(data: &[u8]) -> Self {
-		let magic = b"LELR";
+	pub fn ingest(data: &[u8]) -> Result<Self, LriError> {
+		if data.len() < 32 {
+			return Err(LriError::TruncatedBlock {
+				need: 32,
+				have: data.len(),
+			});
+		}
 
-		if &data[0..4] != magic {
-			panic!("Magic nubmer is wrong");
+		if &data[0..4] != b"LELR" {
+			return Err(LriError::InvalidMagic);
 		}
 
 		let combined_length = u64::from_le_bytes(data[4..12].try_into().unwrap()) as usize;
@@ -330,21 +349,21 @@ impl Header {
 		let kind = match data[24] {
 			0 => BlockType::LightHeader,
 			1 => BlockType::ViewPreferences,
-			2 => BlockType::GPSData,
-			t => panic!("block type {t} is unknown"),
+			2 => BlockType::Gps,
+			t => return Err(LriError::UnknownBlockType(t)),
 		};
 
-		Header {
+		Ok(Header {
 			block_length: combined_length,
 			message_offset,
 			message_length,
 			kind,
-		}
+		})
 	}
 }
 
 pub enum BlockType {
 	LightHeader,
 	ViewPreferences,
-	GPSData,
+	Gps,
 }

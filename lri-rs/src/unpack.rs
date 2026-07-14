@@ -1,51 +1,44 @@
-const TEN_MASK: u64 = 1023; // ten bits
+use crate::error::LriError;
 
-pub fn tenbit(packd: &[u8], count: usize, upack: &mut [u16]) {
-	let required_len_packd = (count as f32 * (10.0 / 8.0)).ceil() as usize;
+const TEN_MASK: u64 = 1023;
+
+pub fn tenbit(packd: &[u8], count: usize, upack: &mut [u16]) -> Result<(), LriError> {
+	let required_len = count.saturating_mul(10).div_ceil(8);
 
 	if count > upack.len() {
-		panic!(
-			"expected output buffer to be {count} bytes, got {} bytes",
-			upack.len()
-		)
+		return Err(LriError::PixelCountMismatch {
+			expected: count,
+			got: upack.len(),
+		});
 	}
 
-	if required_len_packd > packd.len() {
-		panic!(
-			"expected input to be at least {required_len_packd} bytes, it was {}",
-			packd.len()
-		)
+	if required_len > packd.len() {
+		return Err(LriError::PixelCountMismatch {
+			expected: required_len,
+			got: packd.len(),
+		});
 	}
 
-	let mut packd = packd[..required_len_packd].to_vec();
-	packd.reverse();
-	let chunker = packd.chunks_exact(5);
-	let remain = chunker.remainder();
+	let full_chunks = required_len / 5;
+	let remain = required_len % 5;
 
-	for (idx, chnk) in chunker.enumerate() {
+	for idx in 0..full_chunks {
+		let start = required_len - (idx + 1) * 5;
+		let chnk = &packd[start..start + 5];
 		let long = u64::from_be_bytes([
 			0x00, 0x00, 0x00, chnk[0], chnk[1], chnk[2], chnk[3], chnk[4],
 		]);
 
-		let b4 = long & TEN_MASK;
-		let b3 = (long >> 10) & TEN_MASK;
-		let b2 = (long >> 20) & TEN_MASK;
-		let b1 = (long >> 30) & TEN_MASK;
-
-		let idx = idx * 4;
-		upack[idx] = b1 as u16;
-		upack[idx + 1] = b2 as u16;
-		upack[idx + 2] = b3 as u16;
-		upack[idx + 3] = b4 as u16;
+		let out = idx * 4;
+		upack[out] = ((long >> 30) & TEN_MASK) as u16;
+		upack[out + 1] = ((long >> 20) & TEN_MASK) as u16;
+		upack[out + 2] = ((long >> 10) & TEN_MASK) as u16;
+		upack[out + 3] = (long & TEN_MASK) as u16;
 	}
 
-	if !remain.is_empty() {
-		let mut long_bytes = [0x00; 8];
-
-		for (idx, byte) in remain.iter().enumerate() {
-			long_bytes[idx] = *byte;
-		}
-
+	if remain > 0 {
+		let mut long_bytes = [0u8; 8];
+		long_bytes[..remain].copy_from_slice(&packd[..remain]);
 		let long = u64::from_le_bytes(long_bytes);
 
 		let count_remain = count % 4;
@@ -54,4 +47,6 @@ pub fn tenbit(packd: &[u8], count: usize, upack: &mut [u16]) {
 			upack[start + idx] = ((long >> (10 * idx)) & TEN_MASK) as u16;
 		}
 	}
+
+	Ok(())
 }
