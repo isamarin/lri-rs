@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Lumen</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<div id="drop-overlay" class="drop-overlay hidden">
+		<p>Drop .lri file</p>
+	</div>
+
+	<div class="app">
+		<header class="topbar">
+			<div class="brand">
+				<span class="brand-mark">L</span>
+				<div>
+					<h1>Lumen</h1>
+					<p>Light L16 RAW · <span class="credit">isamarin × BLMK</span></p>
+				</div>
+			</div>
+			<div class="actions">
+				<button id="btn-open-file" type="button">Open .lri</button>
+				<button id="btn-open-dir" type="button" class="secondary">Open folder</button>
+			</div>
+		</header>
+
+		<main class="layout">
+			<aside class="sidebar">
+				<h2>Captures</h2>
+				<ul id="file-list" class="file-list"></ul>
+			</aside>
+
+			<section class="content">
+				<div id="empty-state" class="empty">
+					<p>Open or drop an .lri file, or open a folder of captures.</p>
+				</div>
+
+				<div id="detail" class="detail hidden">
+					<div class="meta-grid" id="meta-grid"></div>
+
+					<div class="panel">
+						<div class="panel-head">
+							<h2>Camera modules</h2>
+							<span id="camera-count" class="badge">0</span>
+						</div>
+						<div id="camera-grid" class="camera-grid"></div>
+					</div>
+
+					<div class="panel export-row">
+						<button id="btn-export" type="button">Export DNGs…</button>
+						<div class="export-progress-wrap hidden" id="export-progress-wrap">
+							<div class="progress-track">
+								<div class="progress-bar" id="progress-bar"></div>
+							</div>
+							<span id="progress-label" class="progress-label"></span>
+						</div>
+						<span id="export-status" class="status"></span>
+					</div>
+				</div>
+			</section>
+		</main>
+		<footer class="colophon">isamarin × BLMK</footer>
+	</div>
+
+	<script src="main.js"></script>
+</body>
+</html>

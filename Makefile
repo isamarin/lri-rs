@@ -1,10 +1,16 @@
-.PHONY: build release release-fast install bench check
+.PHONY: build release release-fast install bench check lumen lumen-release
 
 build:
 	cargo build -p light
 
 release:
 	cargo build --release -p light
+
+lumen:
+	cargo build -p lumen
+
+lumen-release:
+	cargo build --release -p lumen
 
 release-fast:
 	cargo build --profile release-fast -p light
