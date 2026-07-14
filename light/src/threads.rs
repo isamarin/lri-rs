@@ -35,3 +35,19 @@ fn performance_core_count() -> Option<usize> {
 fn performance_core_count() -> Option<usize> {
 	None
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn export_jobs_honors_requested_count() {
+		assert_eq!(export_jobs(Some(8)), 8);
+		assert_eq!(export_jobs(Some(0)), 1);
+	}
+
+	#[test]
+	fn export_jobs_defaults_to_at_least_one() {
+		assert!(export_jobs(None) >= 1);
+	}
+}

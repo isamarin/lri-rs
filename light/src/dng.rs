@@ -219,3 +219,23 @@ pub fn cfa_pattern(cfa: &str) -> Option<[u8; 4]> {
 		_ => None,
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn cfa_pattern_maps_bayer_layouts() {
+		assert_eq!(cfa_pattern("RGGB"), Some([0, 1, 1, 2]));
+		assert_eq!(cfa_pattern("BGGR"), Some([2, 1, 1, 0]));
+		assert_eq!(cfa_pattern("UNKNOWN"), None);
+	}
+
+	#[test]
+	fn align4_rounds_up() {
+		assert_eq!(align4(0), 0);
+		assert_eq!(align4(1), 4);
+		assert_eq!(align4(4), 4);
+		assert_eq!(align4(5), 8);
+	}
+}

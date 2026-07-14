@@ -343,6 +343,39 @@ fn mirror_type_str(mt: MirrorType) -> String {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use lri_rs::LriFile;
+
+	#[test]
+	fn from_lri_builds_focus_pick_for_tele_shot() {
+		let Some(bytes) = lri_rs::fixtures::l16_00078_bytes() else {
+			return;
+		};
+		let lri = LriFile::decode(&bytes).expect("decode");
+		let sidecar = from_lri(&lri);
+		assert_eq!(sidecar.reference_camera.as_deref(), Some("A1"));
+		assert_eq!(sidecar.focal_length, Some(87));
+		let pick = sidecar.focus_pick.expect("focus pick");
+		assert_eq!(pick.shot_focal_mm, 87);
+		assert_eq!(pick.modules.len(), 16);
+		assert!(pick.modules.iter().all(|m| m.k_matrix.is_some()));
+	}
+
+	#[test]
+	fn sidecar_roundtrips_through_json() {
+		let Some(bytes) = lri_rs::fixtures::l16_00078_bytes() else {
+			return;
+		};
+		let lri = LriFile::decode(&bytes).expect("decode");
+		let sidecar = from_lri(&lri);
+		let json = serde_json::to_string(&sidecar).expect("serialize");
+		assert!(json.contains("\"movable_mirror\""));
+		assert!(json.contains("\"focus_pick\""));
+	}
+}
+
 pub fn write_json(lri: &LriFile<'_>, path: &camino::Utf8Path) -> anyhow::Result<()> {
 	let sidecar = from_lri(lri);
 	let json = serde_json::to_string_pretty(&sidecar)?;

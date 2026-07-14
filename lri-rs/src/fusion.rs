@@ -394,12 +394,77 @@ mod tests {
 	}
 
 	#[test]
-	fn l16_00078_movable_mirror_on_tele_modules() {
-		let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../.data-from-camera/L16_00078.lri");
-		if !std::path::Path::new(path).exists() {
+	fn target_intrinsics_focus_distance_threshold() {
+		assert_eq!(target_intrinsics_focus_distance(28), CAL_FOCUS_NEAR);
+		assert_eq!(target_intrinsics_focus_distance(69), CAL_FOCUS_NEAR);
+		assert_eq!(target_intrinsics_focus_distance(70), CAL_FOCUS_FAR);
+		assert_eq!(target_intrinsics_focus_distance(87), CAL_FOCUS_FAR);
+		assert_eq!(target_intrinsics_focus_distance(150), CAL_FOCUS_FAR);
+	}
+
+	#[test]
+	fn pick_intrinsics_nearest_when_exact_missing() {
+		let bundles = vec![
+			bundle(800.0, None, true, false),
+			bundle(1200.0, None, true, false),
+		];
+		let (idx, picked) = pick_intrinsics_bundle(&bundles, 87).unwrap();
+		assert_eq!(idx, 1);
+		assert_eq!(picked.focus_distance, 1200.0);
+	}
+
+	#[test]
+	fn pick_all_focus_bundles_uses_mirror_hall_codes() {
+		let Some(bytes) = crate::fixtures::l16_00078_bytes() else {
 			return;
-		}
-		let data = std::fs::read(path).expect("read fixture");
+		};
+		let lri = crate::LriFile::decode(&bytes).expect("decode fixture");
+		let picks = lri.fusion.pick_all_focus_bundles(lri.focal_length.unwrap_or(87));
+		assert_eq!(picks.len(), 16);
+		let b1 = picks
+			.iter()
+			.find(|(c, _)| *c == CameraId::B1)
+			.map(|(_, s)| s)
+			.expect("B1 pick");
+		assert!(b1.has_extrinsics);
+		assert!(b1.has_movable_mirror);
+		assert!(b1.rotation.is_some());
+	}
+
+	#[test]
+	fn mirror_extrinsics_override_canonical_when_hall_present() {
+		let mm = crate::mirror_pose::tests_support::b1_mirror_fixture();
+		let m = ModuleGeometry {
+			camera: CameraId::B1,
+			mirror_type: Some(MirrorType::Movable),
+			focus_calibrations: vec![
+				bundle(CAL_FOCUS_FAR, Some(1556.0), true, false),
+				FocusCalibration {
+					focus_distance: CAL_FOCUS_NEAR,
+					k_matrix: None,
+					rotation: None,
+					translation: None,
+					reprojection_error: None,
+					focus_hall_code: None,
+					movable_mirror: Some(mm),
+					has_movable_mirror: true,
+				},
+				bundle(CAL_FOCUS_NEAR, None, false, true),
+			],
+			distortion: DistortionSummary::default(),
+			has_vignetting: false,
+		};
+		let sel = pick_focus_bundle_with_mirror(&m, 87, Some(769)).unwrap();
+		assert!(sel.has_extrinsics);
+		assert!(sel.has_movable_mirror);
+		assert_ne!(sel.translation, Some([0.0, 0.0, 0.0]));
+	}
+
+	#[test]
+	fn l16_00078_movable_mirror_on_tele_modules() {
+		let Some(data) = crate::fixtures::l16_00078_bytes() else {
+			return;
+		};
 		let lri = crate::LriFile::decode(&data).expect("decode fixture");
 		assert_eq!(lri.fusion.geometry_module_count(), 16);
 		assert!(

@@ -7,3 +7,4 @@ pub mod render;
 pub mod session;
 pub mod threads;
 pub mod thumbnail;
+pub mod validate_rt;

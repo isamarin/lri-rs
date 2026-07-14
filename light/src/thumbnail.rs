@@ -11,14 +11,47 @@ use crate::threads;
 
 const MAX_SIDE: u32 = 160;
 
-pub fn thumbnail_base64(lri: &LriFile<'_>, camera: CameraId) -> Result<String> {
+/// Grayscale preview pixels plus subsample step (for scaling intrinsics).
+pub fn render_preview_gray(
+	lri: &LriFile<'_>,
+	camera: CameraId,
+	max_side: u32,
+) -> Result<(Vec<u8>, u32, u32, usize)> {
 	let img = lri
 		.images
 		.iter()
 		.find(|i| i.camera == camera)
 		.context("camera not in file")?;
+	let (black, white) = lri.levels_for(img.sensor);
+	let range = (white - black).max(1) as f32;
 
-	let png = render_thumbnail_fast(img, lri)?;
+	let preview = img.decode_preview().context("decode preview")?;
+	let step = subsample_step(preview.width, preview.height, max_side);
+	let (mut bayer, sw, sh) = subsample(&preview.data, preview.width, preview.height, step);
+	rotate_180(&mut bayer, 1);
+
+	let bytes: Vec<u8> = bayer
+		.iter()
+		.map(|p| {
+			let n = (*p).saturating_sub(black) as f32 / range;
+			(n * 255.0).clamp(0.0, 255.0) as u8
+		})
+		.collect();
+
+	Ok((bytes, sw as u32, sh as u32, step))
+}
+
+pub fn render_camera_png(lri: &LriFile<'_>, camera: CameraId) -> Result<Vec<u8>> {
+	let img = lri
+		.images
+		.iter()
+		.find(|i| i.camera == camera)
+		.context("camera not in file")?;
+	render_thumbnail_fast(img, lri)
+}
+
+pub fn thumbnail_base64(lri: &LriFile<'_>, camera: CameraId) -> Result<String> {
+	let png = render_camera_png(lri, camera)?;
 	Ok(format!("data:image/png;base64,{}", STANDARD.encode(png)))
 }
 
@@ -68,24 +101,9 @@ pub fn parse_camera_id(name: &str) -> Option<CameraId> {
 }
 
 /// Grid preview: subsampled Bayer as grayscale — no debayer.
-fn render_thumbnail_fast(img: &RawImage<'_>, lri: &LriFile<'_>) -> Result<Vec<u8>> {
-	let (black, white) = lri.levels_for(img.sensor);
-	let range = (white - black).max(1) as f32;
-
-	let preview = img.decode_preview().context("decode preview")?;
-	let step = subsample_step(preview.width, preview.height, MAX_SIDE);
-	let (mut bayer, sw, sh) = subsample(&preview.data, preview.width, preview.height, step);
-	rotate_180(&mut bayer, 1);
-
-	let bytes: Vec<u8> = bayer
-		.iter()
-		.map(|p| {
-			let n = (*p).saturating_sub(black) as f32 / range;
-			(n * 255.0).clamp(0.0, 255.0) as u8
-		})
-		.collect();
-
-	encode_png(sw as u32, sh as u32, &bytes, ColorType::Grayscale)
+pub(crate) fn render_thumbnail_fast(img: &RawImage<'_>, lri: &LriFile<'_>) -> Result<Vec<u8>> {
+	let (bytes, w, h, _) = render_preview_gray(lri, img.camera, MAX_SIDE)?;
+	encode_png(w, h, &bytes, ColorType::Grayscale)
 }
 
 fn subsample_step(width: usize, height: usize, max_side: u32) -> usize {
@@ -103,6 +121,53 @@ fn subsample(data: &[u16], width: usize, height: usize, step: usize) -> (Vec<u16
 		}
 	}
 	(out, sw, sh)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn parse_camera_id_covers_all_modules() {
+		for (name, cam) in [
+			("A1", CameraId::A1),
+			("A5", CameraId::A5),
+			("B3", CameraId::B3),
+			("C6", CameraId::C6),
+		] {
+			assert_eq!(parse_camera_id(name), Some(cam));
+		}
+		assert_eq!(parse_camera_id("Z9"), None);
+		assert_eq!(parse_camera_id(""), None);
+	}
+
+	#[test]
+	fn subsample_step_never_zero() {
+		assert_eq!(subsample_step(4160, 3120, 160), 26);
+		assert_eq!(subsample_step(100, 100, 1024), 1);
+		assert_eq!(subsample_step(2000, 1000, 1024), 2);
+	}
+
+	#[test]
+	fn subsample_picks_top_left_of_each_cell() {
+		let data: Vec<u16> = (0..36).map(|i| i as u16).collect();
+		let (out, w, h) = subsample(&data, 6, 6, 2);
+		assert_eq!((w, h), (3, 3));
+		assert_eq!(out, vec![0, 2, 4, 12, 14, 16, 24, 26, 28]);
+	}
+
+	#[test]
+	fn l16_preview_dimensions_match_step() {
+		let Some(bytes) = lri_rs::fixtures::l16_00078_bytes() else {
+			return;
+		};
+		let lri = LriFile::decode(&bytes).expect("decode");
+		let (pixels, w, h, step) = render_preview_gray(&lri, CameraId::A1, 1024).unwrap();
+		assert_eq!(pixels.len(), (w * h) as usize);
+		assert!(w <= 1024);
+		assert!(h <= 1024);
+		assert!(step >= 1);
+	}
 }
 
 fn encode_png(width: u32, height: u32, data: &[u8], color: ColorType) -> Result<Vec<u8>> {

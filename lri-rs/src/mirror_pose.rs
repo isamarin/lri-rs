@@ -308,12 +308,58 @@ mod tests {
 	}
 
 	#[test]
+	fn tan_half_theta_actuator_mapping() {
+		let mapping = MirrorActuatorMappingData {
+			transformation_type: ActuatorTransformType::TanHalfTheta,
+			actuator_length_offset: 0.0,
+			actuator_length_scale: 1.0,
+			mirror_angle_offset: 10.0,
+			mirror_angle_scale: 5.0,
+			actuator_angle_pairs: vec![],
+			quadratic_model: None,
+			angle_to_hall_code_error: None,
+			hall_code_to_angle_error: None,
+			hall_code_range: None,
+		};
+		let angle = hall_code_to_mirror_angle_deg(1, &mapping).unwrap();
+		let x = 1.0f64;
+		let expected = 10.0 + 5.0 * (x * 0.5).tan();
+		assert!((angle - expected).abs() < 1e-6);
+	}
+
+	#[test]
+	fn unknown_transform_returns_none() {
+		let mapping = MirrorActuatorMappingData {
+			transformation_type: ActuatorTransformType::Unknown,
+			actuator_length_offset: 0.0,
+			actuator_length_scale: 1.0,
+			mirror_angle_offset: 0.0,
+			mirror_angle_scale: 1.0,
+			actuator_angle_pairs: vec![],
+			quadratic_model: None,
+			angle_to_hall_code_error: None,
+			hall_code_to_angle_error: None,
+			hall_code_range: None,
+		};
+		assert!(hall_code_to_mirror_angle_deg(100, &mapping).is_none());
+	}
+
+	#[test]
+	fn b1_hall_769_matches_near_lut_angle() {
+		let mm = tests_support::b1_mirror_fixture();
+		let mapping = mm.actuator_mapping.as_ref().unwrap();
+		let angle = hall_code_to_mirror_angle_deg(769, mapping).unwrap();
+		let ext = extrinsics_from_movable_mirror(&mm, 769).unwrap();
+		assert!((angle - 44.75521).abs() < 0.02);
+		assert!(ext.rotation.iter().all(|v| v.is_finite()));
+		assert!(ext.translation[2].abs() < 50.0);
+	}
+
+	#[test]
 	fn l16_00078_movable_modules_get_mirror_extrinsics() {
-		let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../.data-from-camera/L16_00078.lri");
-		if !std::path::Path::new(path).exists() {
+		let Some(data) = crate::fixtures::l16_00078_bytes() else {
 			return;
-		}
-		let data = std::fs::read(path).expect("read fixture");
+		};
 		let lri = crate::LriFile::decode(&data).expect("decode fixture");
 		let mut with_rt = 0usize;
 		for m in &lri.fusion.module_geometry {
@@ -338,5 +384,43 @@ mod tests {
 			with_rt += 1;
 		}
 		assert!(with_rt >= 3, "expected mirror extrinsics on shot modules");
+	}
+}
+
+/// Shared mirror fixture for unit tests in `fusion` and `mirror_pose`.
+#[cfg(test)]
+pub(crate) mod tests_support {
+	use super::*;
+	use crate::fusion::{MirrorActuatorMappingData, MirrorSystemData, MovableMirrorData};
+
+	pub fn b1_mirror_fixture() -> MovableMirrorData {
+		MovableMirrorData {
+			mirror_system: Some(MirrorSystemData {
+				real_camera_location: [18.54517, 7.6582804, -3.4655511],
+				real_camera_orientation: [
+					-0.38093942, 0.47482356, 0.7933648, -0.49646932, 0.61882627, -0.60874647,
+					-0.7800022, -0.6257768, 1.5680847e-8,
+				],
+				rotation_axis: [0.60439825, 0.7966334, -0.008826814],
+				point_on_rotation_axis: [22.03876, 5.055312, 0.8291366],
+				distance_mirror_plane_to_point_on_rotation_axis: 3.9343035,
+				mirror_normal_at_zero_degrees: [0.79949564, -0.6006531, -0.0047436645],
+				flip_img_around_x: false,
+				mirror_angle_range: crate::fusion::Range2F { min: 35.5, max: 44.75 },
+				reprojection_error: Some(0.35),
+			}),
+			actuator_mapping: Some(MirrorActuatorMappingData {
+				transformation_type: ActuatorTransformType::MeanStdNormalize,
+				actuator_length_offset: 547.6,
+				actuator_length_scale: 175.66673,
+				mirror_angle_offset: 40.150547,
+				mirror_angle_scale: 3.6576087,
+				actuator_angle_pairs: vec![],
+				quadratic_model: None,
+				angle_to_hall_code_error: None,
+				hall_code_to_angle_error: None,
+				hall_code_range: None,
+			}),
+		}
 	}
 }

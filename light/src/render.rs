@@ -49,3 +49,26 @@ pub fn rotate_180<T: Copy>(data: &mut [T], channels: usize) {
 	}
 	data.copy_from_slice(&tmp);
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn rotate_180_single_channel() {
+		let mut data = vec![1u8, 2, 3, 4];
+		rotate_180(&mut data, 1);
+		assert_eq!(data, vec![4, 3, 2, 1]);
+	}
+
+	#[test]
+	fn rotate_180_rgb_pixels() {
+		let mut data = vec![
+			1, 10, 100, //
+			2, 20, 200, //
+			3, 30, 300, //
+		];
+		rotate_180(&mut data, 3);
+		assert_eq!(data, vec![3, 30, 300, 2, 20, 200, 1, 10, 100]);
+	}
+}

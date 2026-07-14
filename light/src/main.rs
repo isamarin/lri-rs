@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use light::{extract, gather};
+use light::{extract, gather, validate_rt};
 
 #[derive(Parser)]
 #[command(
@@ -21,6 +21,21 @@ enum Command {
 		/// Directory containing .lri / .jpg / .lris files
 		path: camino::Utf8PathBuf,
 	},
+	/// Validate R/t by warping module previews and comparing to Lumen fused JPG
+	Validate {
+		/// Input .lri file
+		#[arg(long)]
+		lri: camino::Utf8PathBuf,
+		/// Lumen fused output .jpg
+		#[arg(long)]
+		lumen: camino::Utf8PathBuf,
+		/// Output directory for overlays and metrics
+		#[arg(short, long)]
+		output: camino::Utf8PathBuf,
+		/// Longest preview side in pixels (default 1024)
+		#[arg(long, default_value_t = 1024)]
+		max_side: u32,
+	},
 	/// Extract per-camera DNGs from one LRI file
 	Extract {
 		/// Input .lri file
@@ -38,6 +53,12 @@ fn main() -> Result<()> {
 
 	match cli.command {
 		Command::Gather { path } => gather::run(&path),
+		Command::Validate {
+			lri,
+			lumen,
+			output,
+			max_side,
+		} => validate_rt::run(&lri, &lumen, &output, max_side),
 		Command::Extract { input, output, jobs } => extract::run(&input, &output, jobs),
 	}
 }
