@@ -1,33 +1,96 @@
-Still early days. Some things work, some things don't.
+# lri-rs
 
-I've detailed what I know about the LRI format in [LRI.md](LRI.md). Details about a weird format they use called Bayer JPEG described in [bayer_jpeg.md](bayer_jpeg.md).
+Rust workspace for **Light L16** `.lri` (Light Raw Image) files — parse, survey, and export per-camera RAW.
 
-A friend archived a lot of Light L16 stuff at [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive). Notably it contains firmaware images, instructions for upgrading your firmware, root instructions, and a lot more! It was incredibly helpful.
+## Quick start
 
-### lri-rs
-A Rust crate for parsing LRI files. This library isn't perfect, but it works enough to be able to grab image data from the files. 
+```bash
+# Optimized release build (LTO + native CPU flags on Apple Silicon)
+make release
 
-The code here is a mess, but I'm working to improve it. Reading the metadata from the LRI files is weird! It's all in protobuf messages and those protobuf messages make *a lot* or stuff "optional". We end up with a lot of duplicated data
+# Survey a folder of captures
+./target/release/light gather /path/to/photos/
 
-### prism
-Breaks an LRI into the individual images it contains  
-`prism <lri> <output_directory>`
+# Extract all camera modules to PNG (parallel)
+./target/release/light extract photo.lri ./output/ --jobs 8
+```
 
-TODO: I'd like to, one day, be able to write DNG files from prism, but currently it just spits out PNG.
+Install globally:
 
-### lri-proto
-This is a gently modified version of the [dllu/lri-rs](https://github.com/dllu/lri-rs) repository. Without the work from Daniel pulling the protobuf definitions from the Lumen software I truly don't know if I could've got as far as I did.
+```bash
+make install   # → ~/.cargo/bin/light
+```
 
-MIT Copyright Daniel Lawrence Lu
+## `light` CLI
 
-### lri-study
-Run with the arguments `gather <path>` to print information about the LRI files in the directory to stdout.
+| Command | Description |
+| ------- | ----------- |
+| `light gather <dir>` | Metadata report for every `.lri` in a directory |
+| `light extract <lri> <out> [--jobs N]` | Per-camera PNG export (rayon-parallel) |
 
-This was very useful to me while developing lri-rs to be able to see if patterns repeated across many different images so I could make some assumptions.
+Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in workspace).
 
-#### Licensing?
-`lri-proto` is MIT Copyright Daniel Lawrence Lu.
+## Workspace
 
-everything else is ISC copyright gennyble <gen@nyble.dev>.
+| Crate | Role |
+| ----- | ---- |
+| **lri-rs** | Library — `LriFile::decode()`, `RawImage::decode_pixels()` |
+| **lri-proto** | Protobuf types ([dllu/lri-rs](https://github.com/dllu/lri-rs) / Lumen) |
+| **light** | CLI tool |
 
-Just means you have to provide attribution to the correct person if you use this code and that you're free to do with it what you like.
+## Documentation
+
+- [LRI.md](LRI.md) — block format, cameras, colour calibration
+- [bayer_jpeg.md](bayer_jpeg.md) — BJPG container
+
+## Library example
+
+```rust
+let data = std::fs::read("photo.lri")?;
+let lri = lri_rs::LriFile::decode(&data)?;
+
+for img in lri.images() {
+    let pixels = img.decode_pixels()?; // Packed10bpp + Bayer JPEG
+    let (black, white) = lri.levels_for(img.sensor);
+}
+```
+
+## Apple Silicon tuning
+
+This fork is set up for fast native builds on M-series Macs:
+
+| Setting | Location |
+| ------- | -------- |
+| `target-cpu=native` | [`.cargo/config.toml`](.cargo/config.toml) |
+| Fat LTO, 1 codegen unit | `[profile.release]` in root `Cargo.toml` |
+| `release-fast` profile | Thin LTO for quicker iteration (`make release-fast`) |
+| Zero-copy block parse | `lri-rs` keeps slices into input buffer |
+| Allocation-free 10 bpp unpack | reads packed RAW backwards in-place |
+| Parallel PNG export | `rayon` in `light extract` |
+
+Benchmark 10 bpp unpack:
+
+```bash
+make bench
+```
+
+## What works (v0.2)
+
+| Feature | Status |
+| ------- | ------ |
+| Block parse with error handling | Yes |
+| Packed 10 bpp unpack | Yes |
+| Bayer JPEG decode → pixels | Yes |
+| PNG export (both RAW formats) | Yes |
+| `sensor_data` black/white levels | Yes (via `levels_for`) |
+| GPS / IMU / geometry | Proto only |
+| DNG export | Planned |
+
+## Resources
+
+- [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive) — firmware, root, archived L16 tooling
+
+## Licensing
+
+- `lri-proto` — MIT, Daniel Lawrence Lu
+- Everything else — ISC, gennyble \<gen@nyble.dev\>
