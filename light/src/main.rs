@@ -5,8 +5,12 @@ use light::{extract, fuse, gather, validate_rt};
 #[derive(Parser)]
 #[command(
 	name = "light",
-	about = "Luminat — Light L16 fusion tooling",
-	long_about = "Luminat — open 16→1 fusion for Light L16 (.lri decode, warp, blend). isamarin × BLMK",
+	about = "Luminat — illuminate the 16→1 ritual",
+	long_about = "\
+Luminat — a not-so-secret society for Light L16.\n\n\
+Sixteen modules witness; one image emerges. We decode .lri, undistort, warp, and blend — \
+the fusion rite Lumen kept behind closed doors.\n\n\
+All seeing is computational. isamarin × BLMK",
 	version
 )]
 struct Cli {
@@ -106,7 +110,8 @@ fn main() -> Result<()> {
 			depth_min_mm,
 			depth_max_mm,
 			depth_steps,
-		),
+		)
+		.map(|_| ()),
 		Command::Extract { input, output, jobs } => extract::run(&input, &output, jobs),
 	}
 }

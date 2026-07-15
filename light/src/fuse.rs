@@ -48,7 +48,35 @@ pub fn run(
 	depth_min_mm: f64,
 	depth_max_mm: f64,
 	depth_steps: usize,
-) -> Result<()> {
+) -> Result<FuseSummary> {
+	run_with_progress(
+		lri_path,
+		output,
+		lumen_jpg,
+		max_side,
+		full_res,
+		export_tiff,
+		export_dng,
+		depth_min_mm,
+		depth_max_mm,
+		depth_steps,
+		|_, _, _| {},
+	)
+}
+
+pub fn run_with_progress(
+	lri_path: &Utf8Path,
+	output: &Utf8Path,
+	lumen_jpg: Option<&Utf8Path>,
+	max_side: u32,
+	full_res: bool,
+	export_tiff: bool,
+	export_dng: bool,
+	depth_min_mm: f64,
+	depth_max_mm: f64,
+	depth_steps: usize,
+	on_progress: impl Fn(&str, usize, usize) + Send + Sync,
+) -> Result<FuseSummary> {
 	let session = LriSession::open(lri_path)?;
 	session.with_lri(|lri| {
 		run_decoded(
@@ -62,6 +90,7 @@ pub fn run(
 			depth_min_mm,
 			depth_max_mm,
 			depth_steps,
+			&on_progress,
 		)
 	})
 }
@@ -77,7 +106,9 @@ fn run_decoded(
 	depth_min_mm: f64,
 	depth_max_mm: f64,
 	depth_steps: usize,
-) -> Result<()> {
+	on_progress: &(impl Fn(&str, usize, usize) + Send + Sync),
+) -> Result<FuseSummary> {
+	on_progress("prepare", 0, 1);
 	let canvas = ViewOutput::LUMEN_CANVAS;
 	let fuse_max_side = if full_res {
 		canvas.0.max(canvas.1)
@@ -154,6 +185,9 @@ fn run_decoded(
 		);
 	}
 
+	on_progress("prepare", 1, 1);
+	on_progress("depth", 0, 1);
+
 	let (best_depth, best_score) = plane_sweep(sweep_min, sweep_max, depth_steps, |z| {
 		let h = warp_homography(&tele_pose, &ref_pose, z);
 		let warped = warp_gray(&tele_img, &h, ref_w, ref_h);
@@ -166,6 +200,7 @@ fn run_decoded(
 	eprintln!(
 		"depth sweep ({sweep_min:.0}→{sweep_max:.0}): best={best_depth:.0}mm score={best_score:.4}"
 	);
+	on_progress("depth", 1, 1);
 
 	let lumen_fit = lumen_jpg.map(|path| {
 		let lumen = load_lumen_gray(path)?;
@@ -187,11 +222,13 @@ fn run_decoded(
 	let mut blend_w = vec![0u32; (ref_w * ref_h) as usize];
 	accumulate(&mut blend_acc, &mut blend_w, &ref_img, 1.0);
 
+	let warp_total = picks.iter().filter(|(c, _)| *c != ref_cam).count();
 	let mut warped_count = 0usize;
 	for (camera, sel) in &picks {
 		if *camera == ref_cam {
 			continue;
 		}
+		on_progress("warp", warped_count, warp_total);
 		let (bytes, sw, sh, step) =
 			thumbnail::render_preview_gray(lri, *camera, fuse_max_side)?;
 		let module = lri
@@ -208,8 +245,11 @@ fn run_decoded(
 		accumulate_masked(&mut blend_acc, &mut blend_w, &warped);
 		warped_count += 1;
 	}
+	on_progress("warp", warp_total, warp_total);
 
+	on_progress("blend", 0, 1);
 	let fused = normalize_blend(&blend_acc, &blend_w, ref_w, ref_h);
+	on_progress("blend", 1, 1);
 
 	let canvas_img = if full_res && (fused.width(), fused.height()) != canvas {
 		image::imageops::resize(&fused, canvas.0, canvas.1, FilterType::Triangle)
@@ -218,6 +258,8 @@ fn run_decoded(
 	};
 	let cropped = apply_view_output(canvas_img, &lri.view_output, canvas);
 	let (cx, cy, cw, ch) = lri.view_output.crop_rect_px(canvas);
+
+	on_progress("export", 0, 1);
 
 	let fused_path = output.join("fused.png");
 	fused.save(&fused_path).context("write fused.png")?;
@@ -294,6 +336,7 @@ fn run_decoded(
 		output.join("fuse.json"),
 		serde_json::to_string_pretty(&summary)?,
 	)?;
+	on_progress("export", 1, 1);
 
 	eprintln!(
 		"fused {warped_count}+1 modules @ {best_depth:.0}mm → {fused_path}"
@@ -302,7 +345,7 @@ fn run_decoded(
 		eprintln!("fused vs lumen ncc={ncc:.4}");
 	}
 
-	Ok(())
+	Ok(summary)
 }
 
 /// When ToF reports a positive range (metres), centre the sweep around it.

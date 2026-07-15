@@ -396,3 +396,226 @@ button.secondary:hover {
 .status.err {
 	color: var(--danger);
 }
+
+.fuse-panel .panel-head {
+	margin-bottom: 0.75rem;
+}
+
+.fuse-drop-zone {
+	border: 2px dashed var(--border);
+	border-radius: var(--radius);
+	padding: 1rem 1.1rem;
+	margin-bottom: 0.85rem;
+	text-align: center;
+	background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+	transition: border-color 0.12s, background 0.12s;
+}
+
+.fuse-drop-zone.active {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.fuse-drop-title {
+	margin: 0;
+	font-weight: 600;
+	font-size: 0.9rem;
+}
+
+.fuse-drop-hint {
+	margin: 0.3rem 0 0;
+	font-size: 0.78rem;
+	color: var(--text-dim);
+}
+
+.fuse-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 0.85rem;
+}
+
+.fuse-mode {
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.radio-pill {
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+}
+
+.radio-pill input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.radio-pill span {
+	display: inline-block;
+	padding: 0.45rem 0.85rem;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: var(--bg-hover);
+	color: var(--text-dim);
+	font-size: 0.85rem;
+	font-weight: 600;
+	transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.radio-pill input:checked + span {
+	background: color-mix(in srgb, var(--accent) 18%, var(--bg-hover));
+	border-color: var(--accent);
+	color: var(--text);
+}
+
+.fuse-options {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.fuse-options.disabled {
+	opacity: 0.35;
+	pointer-events: none;
+}
+
+.check {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	cursor: pointer;
+	font-size: 0.85rem;
+	color: var(--text-dim);
+}
+
+.check input {
+	accent-color: var(--accent);
+}
+
+.fuse-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.fuse-progress-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	min-width: 220px;
+}
+
+.fuse-result {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 240px;
+	gap: 1rem;
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--border);
+}
+
+.fuse-side {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+	.fuse-result {
+		grid-template-columns: 1fr;
+	}
+}
+
+.fuse-preview-wrap {
+	background: #0c0d0f;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	overflow: hidden;
+	display: grid;
+	place-items: center;
+	min-height: 180px;
+}
+
+.fuse-preview-wrap img {
+	display: block;
+	max-width: 100%;
+	max-height: 420px;
+	object-fit: contain;
+	cursor: grab;
+}
+
+.fuse-preview-wrap img:active {
+	cursor: grabbing;
+}
+
+.fuse-exports-label {
+	margin: 0 0 0.4rem;
+	font-size: 0.68rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-dim);
+}
+
+.fuse-export-chips {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.export-chip {
+	width: 100%;
+	text-align: left;
+	background: var(--bg);
+	color: var(--text);
+	border: 1px solid var(--border);
+	padding: 0.45rem 0.55rem;
+	font-size: 0.78rem;
+	font-weight: 500;
+	font-family: var(--mono-font);
+	cursor: grab;
+}
+
+.export-chip:hover {
+	background: var(--bg-hover);
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.export-chip:active {
+	cursor: grabbing;
+}
+
+.export-chip .chip-icon {
+	color: var(--accent);
+	margin-right: 0.25rem;
+}
+
+.fuse-stats {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	font-size: 0.8rem;
+}
+
+.fuse-stat {
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 0.55rem 0.65rem;
+}
+
+.fuse-stat .label {
+	font-size: 0.68rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-dim);
+}
+
+.fuse-stat .value {
+	margin-top: 0.2rem;
+	font-family: var(--mono-font);
+	font-size: 0.82rem;
+	word-break: break-all;
+}

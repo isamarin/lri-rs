@@ -3,21 +3,21 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>Lumen</title>
+	<title>Luminat</title>
 	<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 	<div id="drop-overlay" class="drop-overlay hidden">
-		<p>Drop .lri file</p>
+		<p id="drop-overlay-text">Drop .lri file</p>
 	</div>
 
 	<div class="app">
 		<header class="topbar">
 			<div class="brand">
-				<span class="brand-mark">L</span>
+				<span class="brand-mark">Lu</span>
 				<div>
-					<h1>Lumen</h1>
-					<p>Light L16 RAW · <span class="credit">isamarin × BLMK</span></p>
+					<h1>Luminat</h1>
+					<p title="Sixteen modules witness; one image emerges.">We know what the sixteen saw · <span class="credit">isamarin × BLMK</span></p>
 				</div>
 			</div>
 			<div class="actions">
@@ -48,8 +48,70 @@
 						<div id="camera-grid" class="camera-grid"></div>
 					</div>
 
+					<div class="panel fuse-panel">
+						<div class="panel-head">
+							<h2>Fuse</h2>
+							<span class="badge">16 → 1</span>
+						</div>
+
+						<div id="fuse-drop-zone" class="fuse-drop-zone">
+							<p class="fuse-drop-title">Drop to fuse</p>
+							<p class="fuse-drop-hint">.lri → fuse · folder → export here</p>
+						</div>
+
+						<div class="fuse-controls">
+							<div class="fuse-mode">
+								<label class="radio-pill">
+									<input type="radio" name="fuse-mode" value="preview" checked />
+									<span>Preview</span>
+								</label>
+								<label class="radio-pill">
+									<input type="radio" name="fuse-mode" value="full-res" />
+									<span>Full-res</span>
+								</label>
+							</div>
+
+							<div class="fuse-options" id="fuse-export-options">
+								<label class="check">
+									<input type="checkbox" id="opt-tiff" checked />
+									<span>TIFF 16-bit</span>
+								</label>
+								<label class="check">
+									<input type="checkbox" id="opt-dng" checked />
+									<span>DNG</span>
+								</label>
+							</div>
+
+							<div class="fuse-actions">
+								<button id="btn-fuse" type="button">Fuse</button>
+								<button id="btn-fuse-export" type="button" class="secondary hidden">Fuse to folder…</button>
+								<span id="fuse-status" class="status"></span>
+							</div>
+
+							<div class="fuse-progress-wrap hidden" id="fuse-progress-wrap">
+								<div class="progress-track">
+									<div class="progress-bar" id="fuse-progress-bar"></div>
+								</div>
+								<span id="fuse-progress-label" class="progress-label"></span>
+							</div>
+						</div>
+
+						<div id="fuse-result" class="fuse-result hidden">
+							<div class="fuse-preview-wrap">
+								<img id="fuse-preview" alt="Fused preview" title="Drag to export" />
+							</div>
+							<div class="fuse-side">
+								<div class="fuse-stats" id="fuse-stats"></div>
+								<div id="fuse-exports" class="fuse-exports hidden">
+									<p class="fuse-exports-label">Drag out</p>
+									<div id="fuse-export-chips" class="fuse-export-chips"></div>
+								</div>
+							</div>
+						</div>
+					</div>
+
 					<div class="panel export-row">
-						<button id="btn-export" type="button">Export DNGs…</button>
+						<button id="btn-export" type="button" class="secondary">Export DNGs…</button>
 						<div class="export-progress-wrap hidden" id="export-progress-wrap">
 							<div class="progress-track">
 								<div class="progress-bar" id="progress-bar"></div>
