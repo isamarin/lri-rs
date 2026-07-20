@@ -30,8 +30,29 @@ localized here.
 - **Approach:** systematically flip one variable at a time (angle sign / rotation-axis
   direction / the `flip_img_around_x` condition) using per-pair NCC as the oracle.
   Do NOT re-tune on B2/B3 alone — validate across B1, B5, and C modules together.
-- **Reference if empirics stall:** the mirror function in `libcp.so` at
-  `0x1c7580` / `0x1c79e0` (Ghidra). `mirror_pose.rs` claims to port these.
+### RE fallback — if the empirical flip/sign search stalls
+
+Do empirics first (above). Only reverse the engine if the sign/flip won't yield.
+
+- **Target:** the mirror function in the ARM `libcp.so` at **`0x1c7580`** (and
+  `0x1c79e0` for the translation post-process) — `mirror_pose.rs` claims to port
+  exactly these. Grok already located the addresses, so we have an anchor.
+- **No symbols to lean on:** both binaries are stripped inside. `nm` shows only
+  the public CIAPI (`DirectRenderer`, `RendererBase`); mirror math is unnamed
+  internal in *both* the `.so` and the desktop `.dylib`. So RE is address-driven,
+  not name-driven — the desktop build is NOT easier for this.
+- **Nothing required to start:** system `objdump` already disassembles the ARM
+  `.so` (`objdump -d --start-address=0x1c7580 --stop-address=0x1c78c0 libcp.so`).
+  Raw asm is readable now; the math is float-SIMD (reflection, Rodrigues, flip).
+- **Optional, for readable C:** `brew install radare2` (headless `pdg`/r2ghidra)
+  or `brew install openjdk` + Ghidra. Speeds up formula comparison vs asm; not a
+  blocker.
+- **Both engines are extracted** to `vendor/light-l16/APKs/Firmware-1.3.5.1/`:
+  `libcp.so` (ARM — the mirror target, has the address) and `libcp.dylib`
+  (desktop — use for public API / pipeline order, not mirror formulas).
+- **What to recover:** confirm the exact reflection/Rodrigues composition, the
+  `flip_img_around_x` condition, and the angle/axis sign — the three variables
+  the empirical search is toggling.
 
 ## 2. Per-pixel depth (SGM) — replace the single plane
 
