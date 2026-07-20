@@ -35,6 +35,10 @@ localized here.
 
 ## 2. Per-pixel depth (SGM) — replace the single plane
 
+Architecture is independently confirmed by patent **US 9,563,033 B2** (depth
+from stereo/parallax) — see [`PATENTS.md`](PATENTS.md). It backs the SGM path but
+contains no engine mechanics.
+
 Residual softness in the fused frame is the single fronto-parallel plane limit.
 The engine does a dense per-pixel `WarpField` (symbols `DepthToDisparity`;
 depth is **mm along the optical axis, inverse-range**). Replace `plane_sweep`
