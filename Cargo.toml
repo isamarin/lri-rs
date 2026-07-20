@@ -1,5 +1,5 @@
 [workspace]
-members = ["lri-proto", "lri-rs", "light", "lumen/src-tauri"]
+members = ["lri-proto", "lri-rs", "openfusion", "light", "lumen/src-tauri"]
 resolver = "2"
 
 [workspace.package]

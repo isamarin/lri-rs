@@ -94,10 +94,12 @@ Key proto: [`geometric_calibration.proto`](lri-proto/proto/geometric_calibration
 - Many modules use a **movable mirror** (`MirrorType.MOVABLE`) — pose depends on focus/hall code, not fixed extrinsics.
 - **ToF** sensor gives coarse depth; **multi-focus** modules give fine depth via disparity (hypothesis — verify against Lumen binary / papers).
 - **Mono modules** (C row): likely used for depth / luminance, not colour.
+- **Not all 16 fire per shot.** Hardware groups: 5× 28 mm + 5× 70 mm + 6× 150 mm. Per capture only the subset relevant to the selected focal length is exposed — **≤10–11 pixel modules**, never 16. Confirmed on real captures (see log 2026-07-19). `module_calibration[]` still carries geometry for all 16; `modules[]` (pixel surfaces) carries only the fired subset. "16→1" is marketing — the real combine is **N_fired → 1**.
 
 Open questions — fill in when confirmed:
 
-- [ ] Exact unit of `tof_range` (metres vs mm vs dioptres)
+- [ ] Which `CameraId`s map to 28/70/150 groups, and mono set (needs multi-focal inventory across all 61 captures — in progress)
+- [ ] Exact unit of `tof_range` (metres vs mm vs dioptres) — reads `0.00` on all captures so far
 - [ ] How Lumen picks one `per_focus_calibration` entry for a given `image_focal_length`
 - [ ] Whether `imu_data.frame_index` aligns to sensor row readout
 - [ ] Role of `angle_optical_center_mapping` in final projection
@@ -252,6 +254,59 @@ When working on fusion:
 ---
 
 ## Log
+
+### 2026-07-19 — First working fused frame (healthy triple B4+B2+B3)
+
+**Confidence:** confirmed (visual + NCC on real capture L16_00003)
+**Source:** `light fuse --lri L16_00003.lri` with `LIGHT_FUSE_ONLY="B2,B3,B4"`
+**Finding:** After the two warp/preview fixes and the R/t-convention verification, fusing only the geometry-healthy subset {B4 ref, B2, B3} yields the first recognizable fused image — sign, trees, guardrail, grass all aligned. Depth-sweep score jumped 0.099 → **0.43** once broken-mirror modules were excluded from the sweep (they were injecting noise into NCC). Pairs: B4←B2 ncc 0.43, B4←B3 0.41 at depth 2312 mm.
+Progression this session: raw Grok → pure noise; +parallax sign +debayer → blurry scene; healthy triple → sharp recognizable scene.
+**Implication:** whole pipeline after the fixes is sound. Residual softness is the single-plane MVP limit (one fronto-parallel plane can't sharpen trees at varying depth) — next is per-pixel depth (SGM). `LIGHT_FUSE_ONLY` lets us keep producing frames on healthy modules while `mirror_pose` is repaired.
+**Follow-up:** [ ] per-pixel depth (SGM) for sharpness; [ ] fix `mirror_pose` R/t for non-B2/B3 movable modules (Grok tuned flip on B2/B3 only, blind, on L16_00078) — dump `LRI_DUMP_MIRROR` + per-pair NCC available for systematic sign/flip/axis search vs `libcp` 0x1c7580.
+
+### 2026-07-19 — Two fusion bugs found reproving Grok; engine pulled from live camera
+
+**Confidence:** confirmed (fix + test + visual on real tele capture; symbols from device `libcp.so`)
+**Source:** `light/src/fuse.rs`, `lri-rs/src/warp.rs`, `light/src/thumbnail.rs`; `vendor/light-l16/APKs/Firmware-1.3.5.1/libcp.so` (pulled over ADB, 7 254 824 B ARM aarch64)
+**Finding:** Grok's Phase-3 MVP produced pure noise on real captures. Two real bugs:
+1. **Parallax sign** in `homography_at_depth` (warp.rs): plane term was `-t_rel n^T/depth`, must be `+`. His only test checked `depth→∞` where the term vanishes, so it passed. Added a finite-depth sign test.
+2. **Preview decoded by naive Bayer decimation, not debayer** (thumbnail.rs `subsample`): took every Nth single Bayer pixel; even step lands on one CFA channel (blue) → dark/noisy on foliage + aliasing → garbage previews. Replaced with box-average per tile (mixes channels to luma, low-pass). Single-module preview went from noise → sharp scene matching the device JPEG. Note: decode→DNG (inherited fork path) was always correct; only the Grok-written fusion preview was broken.
+
+Result: fused output went noise → recognizable-but-blurry scene. Residual blur is the **single-plane MVP limit**, not a bug.
+
+**Engine reference (device `libcp.so`, ARM):**
+- Depth is **mm along OpticalAxis, stored RangeInverse** (`GDepth:Units="mm"`, `measureType="OpticalAxis"`, `Format="RangeInverse"`). Closes the `tof_range` unit question.
+- Warp is a **dense per-pixel `WarpField`**, not a single planar homography (`lt::WarpField`, `ImageWarp<WarpField>`, `DepthToDisparity`). → single-plane can't be sharp; need per-pixel depth.
+- `SparseLNR::initLowerACamera/BCamera<8>`, `MatchedPoint`/`FeaturePoint`/`WarpField`/`CalibData`, `ceres ReProjectionCost` — feature-matched, Ceres-refined warp per camera group.
+- `Baseline too small, check calibration` — depth needs a wide baseline; B4↔B1 (adjacent mid) is too small. Pick a widely separated pair.
+- Mono (C-row) warps on a separate path (`LowerWarpMonoDebug`, `Mono warp has incorrect size`).
+**Follow-up:** [ ] per-pixel depth (plane-sweep per pixel → WarpField) instead of one global plane; [ ] choose wide-baseline pair for depth; [ ] cross-check homography/undistort math against `WebstormProjects/blacklight-for-xbox/light-l16` sources.
+
+### 2026-07-19 — Module rows mapped to focal groups (61-capture inventory)
+
+**Confidence:** confirmed (61 real captures, focal 28–103, `LRI_DUMP_MODULES` inventory)
+**Source:** `.data-from-camera/raw/L16_000*.lri` (61 captures pulled over ADB); per-file gather dump
+**Finding:** Fired module set is a deterministic function of focal length. Two regimes only:
+- **focal 28–66** → `A1–A5 + B1–B5` (10 modules, 155 MB file)
+- **focal 71–103** → `B1–B5 + C1–C6` (11 modules, 170 MB file)
+
+Row → optics group (matches spec 5×28 + 5×70 + 6×150):
+- **A = 28 mm wide** — fires on the short end (≤66)
+- **B = 70 mm mid** — fires at *every* focal length (the constant/reference row)
+- **C = 150 mm tele (mono)** — fires only on the long end (≥71)
+
+Crossover is ~70 mm: 66 → A+B, 71 → B+C. A and C are mutually exclusive; B always present.
+`extract` on a tele capture (focal 77) writes 11 DNG incl. **C1–C6**, `reference camera: B4`. So mono C-row **decodes fine** (packed10bpp, sbro=(-1,-1)); the earlier "10 not 16" was never a bug. Reference = widest fired module (A-row when wide, B-row when tele).
+**Implication for combine:** build the pipeline per-regime. Reference module is the widest *fired* one (not a fixed camera). Mono super-res validation data = the 12 tele captures (170 MB). Depth stereo pairs differ by regime: wide uses A↔B, tele uses B↔C.
+**Follow-up:** [ ] which exact CameraId is reference within A / within B (widest of the group); [ ] does `tof:0.00` hold on tele captures too; [ ] 2-view SGM MVP on a tele pair (B4 ref ↔ one C module).
+
+### 2026-07-19 — First real camera: `modules[]` ≠ 16, it's the fired subset
+
+**Confidence:** confirmed (real captures + hardware spec)
+**Source:** New L16 (fw `00WW_1_351` = 1.3.5.1) over ADB; `light gather` + `LRI_DUMP_MODULES` on `L16_00001.lri`; [imaging-resource L16 spec](https://www.imaging-resource.com/cameras/light-l16-review-the-most-hyped-camera-ever/specifications/)
+**Finding:** `LightHeader` has two distinct repeated fields: `module_calibration[]` (16 — geometry/color for every physical module) and `modules[]` (pixel `sensor_data_surface`, **only the fired subset**). On `focal:28` the file carries **10** pixel modules (A1–A5, B1–B5), each `RAW_PACKED_10BPP`, stride 5200 × 3120 = 16.22 MB → 10 × 16.22 = **162 MB = exact file size**. 178 MB captures carry 11. Hardware fires ≤10 of 16 per shot by focal group (5×28 + 5×70 + 6×150). `extract` writing 10 DNG is **correct**, not a bug. mono (`sbro=(-1,-1)`, e.g. A2) already decodes fine as packed10bpp.
+**Implication for combine:** target is **N_fired → 1**, reference = widest fired module. Geometry for non-fired modules is dead weight per shot. Depth/warp only over fired set.
+**Follow-up:** [ ] full inventory focal→CameraIds across all 61 captures (pull in progress); [ ] confirm 70 mm / 150 mm captures and whether C-row ever fires; [ ] map mono set per group.
 
 ### 2026-07-14 — Geometry lives in module_calibration
 

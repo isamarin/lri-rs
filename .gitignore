@@ -6,3 +6,5 @@
 *.gif
 **/.DS_Store
 /.data-from-camera/
+.env
+.idea/

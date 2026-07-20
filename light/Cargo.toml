@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 lri-rs = { path = "../lri-rs" }
+openfusion = { path = "../openfusion" }
 clap = { version = "4.5", features = ["derive"] }
 camino = "1.1"
 owo-colors = "4.1"

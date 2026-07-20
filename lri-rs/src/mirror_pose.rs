@@ -224,6 +224,16 @@ fn compute_mirror_rt_raw(
 		p.point_on_axis[2] + p.distance * n[2],
 	];
 
+	if std::env::var("LRI_DUMP_MIRROR").is_ok() {
+		eprintln!(
+			"mirror angle={angle_deg:.2} flip={} axis=[{:.3},{:.3},{:.3}] normal0=[{:.3},{:.3},{:.3}] n=[{:.3},{:.3},{:.3}] cam_loc=[{:.2},{:.2},{:.2}]",
+			p.flip_img_around_x,
+			axis[0], axis[1], axis[2],
+			p.mirror_normal[0], p.mirror_normal[1], p.mirror_normal[2],
+			n[0], n[1], n[2],
+			p.real_camera_location[0], p.real_camera_location[1], p.real_camera_location[2],
+		);
+	}
 	let mut r = mat3_mul(reflection_matrix(n), p.r_cam);
 	if p.flip_img_around_x {
 		r = flip_x_mat(r);

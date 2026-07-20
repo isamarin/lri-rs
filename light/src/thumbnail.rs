@@ -111,13 +111,25 @@ fn subsample_step(width: usize, height: usize, max_side: u32) -> usize {
 	((max_dim + max_side - 1) / max_side).max(1) as usize
 }
 
+/// Box-average each `step`×`step` tile. Averaging the tile mixes the Bayer
+/// channels into a luma-like value and low-pass filters before decimation,
+/// avoiding the colour-channel aliasing of naive single-pixel subsampling
+/// (which lands on one CFA channel for even steps and produces moiré).
 fn subsample(data: &[u16], width: usize, height: usize, step: usize) -> (Vec<u16>, usize, usize) {
 	let sw = width.div_ceil(step);
 	let sh = height.div_ceil(step);
 	let mut out = Vec::with_capacity(sw * sh);
-	for y in (0..height).step_by(step) {
-		for x in (0..width).step_by(step) {
-			out.push(data[y * width + x]);
+	for by in (0..height).step_by(step) {
+		for bx in (0..width).step_by(step) {
+			let mut sum = 0u32;
+			let mut n = 0u32;
+			for y in by..(by + step).min(height) {
+				for x in bx..(bx + step).min(width) {
+					sum += data[y * width + x] as u32;
+					n += 1;
+				}
+			}
+			out.push((sum / n.max(1)) as u16);
 		}
 	}
 	(out, sw, sh)
@@ -149,11 +161,12 @@ mod tests {
 	}
 
 	#[test]
-	fn subsample_picks_top_left_of_each_cell() {
+	fn subsample_box_averages_each_cell() {
 		let data: Vec<u16> = (0..36).map(|i| i as u16).collect();
 		let (out, w, h) = subsample(&data, 6, 6, 2);
 		assert_eq!((w, h), (3, 3));
-		assert_eq!(out, vec![0, 2, 4, 12, 14, 16, 24, 26, 28]);
+		// each 2x2 tile averaged: cell(0,0)=(0+1+6+7)/4=3, etc.
+		assert_eq!(out, vec![3, 5, 7, 15, 17, 19, 27, 29, 31]);
 	}
 
 	#[test]

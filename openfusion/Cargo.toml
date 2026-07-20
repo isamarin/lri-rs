@@ -1,0 +1,9 @@
+[package]
+name = "openfusion"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Open reconstruction of the Light L16 16→1 fusion — geometry core (warp, plane-sweep depth)."
+
+[dependencies]
+nalgebra = "0.31"

@@ -5,8 +5,11 @@ use camino::Utf8Path;
 use image::{imageops::FilterType, GrayImage, ImageBuffer, Luma};
 use lri_rs::{
 	distortion::undistort_module_gray,
+	CameraId, LriFile, ModuleDistortion, SelectedFocusBundle,
+};
+use openfusion::{
 	stereo::{ncc_overlap, plane_sweep, warp_homography},
-	CameraId, CameraPose, LriFile, ModuleDistortion, SelectedFocusBundle,
+	CameraPose,
 };
 use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
@@ -127,11 +130,21 @@ fn run_decoded(
 	let present: std::collections::HashSet<CameraId> =
 		lri.images.iter().map(|i| i.camera).collect();
 
+	// Optional module allow-list (e.g. LIGHT_FUSE_ONLY="B2,B3,B4") to fuse a
+	// subset while broken mirror poses are being fixed. Reference is always kept.
+	let only: Option<std::collections::HashSet<String>> = std::env::var("LIGHT_FUSE_ONLY")
+		.ok()
+		.map(|s| s.split(',').map(|x| x.trim().to_uppercase()).collect());
+
 	let picks: Vec<(CameraId, SelectedFocusBundle)> = lri
 		.fusion
 		.pick_all_focus_bundles(focal)
 		.into_iter()
 		.filter(|(c, s)| present.contains(c) && s.k_matrix.is_some() && s.has_extrinsics)
+		.filter(|(c, _)| {
+			only.as_ref()
+				.is_none_or(|set| *c == ref_cam || set.contains(&format!("{c:?}").to_uppercase()))
+		})
 		.collect();
 
 	let ref_module = lri
@@ -176,6 +189,16 @@ fn run_decoded(
 	let tele_pose = pose_from_pick(&tele.1, tele_step);
 	let tele_undist = undistort_preview(&tele_bytes, tw, th, &tele_module.distortion,)?;
 	let tele_img = bytes_to_gray(&tele_undist, tw, th);
+
+	if std::env::var("LIGHT_FUSE_DEBUG").is_ok() {
+		ref_img
+			.save(output.join(format!("dbg_ref_{ref_cam:?}.png")))
+			.ok();
+		tele_img
+			.save(output.join(format!("dbg_tele_{:?}.png", tele.0)))
+			.ok();
+		eprintln!("dbg: ref={ref_cam:?} {ref_w}x{ref_h} tele={:?} {tw}x{th}", tele.0);
+	}
 
 	let tof_range_m = lri.fusion.tof_range_m.filter(|t| *t > 0.0);
 	let (sweep_min, sweep_max) = depth_range_from_tof(tof_range_m, depth_min_mm, depth_max_mm);
@@ -242,6 +265,17 @@ fn run_decoded(
 		let src_img = bytes_to_gray(&undist, sw, sh);
 		let h = warp_homography(&src_pose, &ref_pose, best_depth);
 		let warped = warp_gray(&src_img, &h, ref_w, ref_h);
+		if std::env::var("LIGHT_FUSE_DEBUG").is_ok() {
+			let h_inf = warp_homography(&src_pose, &ref_pose, 1.0e9);
+			let w_inf = warp_gray(&src_img, &h_inf, ref_w, ref_h);
+			let ncc_inf = ncc_overlap(ref_img.as_raw(), w_inf.as_raw());
+			let ncc_depth = ncc_overlap(ref_img.as_raw(), warped.as_raw());
+			let bl = (src_pose.t - ref_pose.t).norm();
+			eprintln!(
+				"pair {ref_cam:?}<-{camera:?} mirror={:?} baseline={bl:.1} ncc_inf={ncc_inf:.3} ncc_depth={ncc_depth:.3}",
+				module.mirror_type
+			);
+		}
 		accumulate_masked(&mut blend_acc, &mut blend_w, &warped);
 		warped_count += 1;
 	}

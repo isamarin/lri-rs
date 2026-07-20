@@ -2026,6 +2026,7 @@ dependencies = [
  "lri-rs",
  "memmap2",
  "nalgebra",
+ "openfusion",
  "ouroboros",
  "owo-colors",
  "png 0.17.10",
@@ -2571,6 +2572,13 @@ name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+
+[[package]]
+name = "openfusion"
+version = "2026.7.14"
+dependencies = [
+ "nalgebra",
+]
 
 [[package]]
 name = "option-ext"

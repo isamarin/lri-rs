@@ -57,7 +57,9 @@ pub fn homography_at_depth(src: &CameraPose, dst: &CameraPose, depth_mm: f64) ->
 	let t_rel = dst.t - r_rel * src.t;
 	let n = Vector3::new(0.0, 0.0, 1.0);
 	let k_src_inv = src.k.try_inverse().expect("singular K_src");
-	dst.k * (r_rel - t_rel * n.transpose() / depth) * k_src_inv
+	// Plane Z_src = depth in the source frame: x_dst ~ K_dst (R_rel + t_rel n^T / depth) K_src^-1 x_src.
+	// The parallax term is +, not - (the textbook minus assumes n^T X + d = 0 with d < 0).
+	dst.k * (r_rel + t_rel * n.transpose() / depth) * k_src_inv
 }
 
 /// Map reference pixel through `H` into source frame: `x_src ~ H^-1 x_ref`.
@@ -89,6 +91,21 @@ mod tests {
 		let mapped = map_ref_to_src(&h, 120.0, 80.0).unwrap();
 		assert!((mapped.0 - 120.0).abs() < 1e-4);
 		assert!((mapped.1 - 80.0).abs() < 1e-4);
+	}
+
+	#[test]
+	fn finite_plane_parallax_has_correct_sign() {
+		// src at origin, dst translated +10 along X (world->cam t). A point on the
+		// principal ray at depth 1000 projects to (cx,cy)=(50,40) in src and must
+		// land at (51,40) in dst: +1 px parallax, not -1.
+		let src = identity_pose(100.0);
+		let mut dst = identity_pose(100.0);
+		dst.t = Vector3::new(10.0, 0.0, 0.0);
+		let h = homography_at_depth(&src, &dst, 1000.0);
+		let p = h * Vector3::new(50.0, 40.0, 1.0);
+		let (x, y) = (p.x / p.z, p.y / p.z);
+		assert!((x - 51.0).abs() < 1e-6, "x={x} expected 51 (got wrong parallax sign?)");
+		assert!((y - 40.0).abs() < 1e-6, "y={y} expected 40");
 	}
 
 	#[test]
