@@ -100,6 +100,11 @@ fn run_decoded(
 	let lumen = lumen_jpg.map(load_lumen_gray).transpose()?;
 	let lumen_fit = lumen.as_ref().map(|l| resize_gray(l, ref_w, ref_h));
 
+	let flip_experiment = FlipExperiment::from_env();
+	if flip_experiment != FlipExperiment::None {
+		eprintln!("warp-flip experiment: {flip_experiment:?}");
+	}
+
 	let overlay_dir = output.join("overlays");
 	fs::create_dir_all(&overlay_dir).context("create overlays directory")?;
 
@@ -131,7 +136,10 @@ fn run_decoded(
 		let r_src = mat3(sel.rotation.unwrap_or(identity9()));
 		let t_src = vec3(sel.translation.unwrap_or([0.0; 3]));
 
-		let h = homography_infinity(&ref_k, &ref_r, &ref_t, &k_src, &r_src, &t_src);
+		let mut h = homography_infinity(&ref_k, &ref_r, &ref_t, &k_src, &r_src, &t_src);
+		if flip_experiment.applies_to(sel) {
+			h *= flip_y_in_source(src_img.height());
+		}
 		let warped = warp_inverse(&src_img, &h, ref_w, ref_h);
 		accumulate_masked(&mut blend_acc, &mut blend_w, &warped);
 
@@ -244,6 +252,58 @@ fn scaled_k(k: [f32; 9], step: usize) -> Matrix3<f64> {
 }
 
 /// Planar homography at infinity: x_ref ~ K_ref (R_ref R_src^T) K_src^-1 x_src.
+/// Which mirror modules get a warp-time image flip. Experiment, default off.
+///
+/// `flip_img_around_x` no longer affects `R` (it used to, by accident — see
+/// OPEN-QUESTIONS §1). What the flag should drive instead is an image flip at
+/// warp time, and *which* modules need it is the open question: the modules
+/// where the flag is true reconstruct correctly with no flip at all, so the
+/// naive reading is already contradicted.
+///
+/// Selected by `LRI_WARP_FLIP`: `flag_false`, `flag_true`, or unset for none.
+/// Deliberately not a CLI flag — this is a hypothesis under test, not a setting
+/// anyone should be choosing between.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum FlipExperiment {
+	None,
+	FlagFalse,
+	FlagTrue,
+}
+
+impl FlipExperiment {
+	fn from_env() -> Self {
+		match std::env::var("LRI_WARP_FLIP").as_deref() {
+			Ok("flag_false") => Self::FlagFalse,
+			Ok("flag_true") => Self::FlagTrue,
+			_ => Self::None,
+		}
+	}
+
+	fn applies_to(self, sel: &SelectedFocusBundle) -> bool {
+		if !sel.has_movable_mirror {
+			return false;
+		}
+		match self {
+			Self::None => false,
+			Self::FlagFalse => !sel.image_flip_x,
+			Self::FlagTrue => sel.image_flip_x,
+		}
+	}
+}
+
+/// Mirror source pixels around the image's horizontal axis: `y ↦ (h−1) − y`.
+///
+/// Right-composed onto the homography, so it acts on source coordinates before
+/// the pose does — which is what "the sensor image arrives flipped" means. No
+/// pixel buffer is touched.
+fn flip_y_in_source(src_h: u32) -> Matrix3<f64> {
+	Matrix3::new(
+		1.0, 0.0, 0.0,
+		0.0, -1.0, f64::from(src_h) - 1.0,
+		0.0, 0.0, 1.0,
+	)
+}
+
 fn homography_infinity(
 	k_ref: &Matrix3<f64>,
 	r_ref: &Matrix3<f64>,

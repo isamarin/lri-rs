@@ -148,6 +148,11 @@ pub struct SelectedFocusBundle {
 	pub reprojection_error: Option<f32>,
 	pub has_movable_mirror: bool,
 	pub has_extrinsics: bool,
+	/// `MirrorSystem.flip_img_around_x` for mirror modules; `false` on the
+	/// canonical path. See [`crate::mirror_pose::MirrorExtrinsics::image_flip_x`]
+	/// — it no longer affects `rotation`, and whether it should drive a warp-time
+	/// image flip is open (OPEN-QUESTIONS §1).
+	pub image_flip_x: bool,
 }
 
 /// Map shot `image_focal_length` (35 mm equiv, from `LightHeader`) to factory intrinsics plane.
@@ -225,6 +230,7 @@ pub fn pick_focus_bundle_with_mirror(
 		translation,
 		reprojection_error,
 		has_extrinsics,
+		image_flip_x,
 	) = if let Some((idx, ext)) = mirror {
 		(
 			Some(idx),
@@ -233,6 +239,7 @@ pub fn pick_focus_bundle_with_mirror(
 			Some(ext.translation),
 			module.focus_calibrations[idx].reprojection_error,
 			true,
+			ext.image_flip_x,
 		)
 	} else if let Some((idx, ext)) = canonical {
 		(
@@ -242,9 +249,10 @@ pub fn pick_focus_bundle_with_mirror(
 			ext.translation,
 			ext.reprojection_error,
 			true,
+			false,
 		)
 	} else {
-		(None, None, None, None, None, false)
+		(None, None, None, None, None, false, false)
 	};
 	Some(SelectedFocusBundle {
 		intrinsics_index,
@@ -260,6 +268,7 @@ pub fn pick_focus_bundle_with_mirror(
 			|| movable_mirror_bundle(&module.focus_calibrations).is_some()
 			|| canonical.map(|(_, e)| e.has_movable_mirror).unwrap_or(false),
 		has_extrinsics,
+		image_flip_x,
 	})
 }
 

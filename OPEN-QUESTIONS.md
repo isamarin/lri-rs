@@ -123,15 +123,63 @@ The remaining difference between {B2, B3, C2, C4} and {B1, B5, C1, C3} is now
 that `flip_img_around_x` describes how the sensor image already arrives, so the
 modules where it is **false** are the ones needing the flip applied downstream.
 
-That has a falsifiable prediction, which is why it is worth one run rather than a
+That has a falsifiable prediction, which is why it was worth one run rather than a
 search: applying an image flip at warp time to the four `flip = false` modules
-should send B1/B5 on `00078` back to ≈ +0.3 **without moving B2/B3/C2/C4 at
-all**. If it does not, stop and go to `0x1c7580` with the sharper question:
-*what does the engine do differently for a `flip = false` module, given parity is
-already handled?*
+should send B1/B5 on `00078` back to ≈ +0.3 **without moving B2/B3/C2/C4 at all**.
 
-Do not tune this by trying axis/sign combinations until a number improves — that
-is what produced the original defect (see superseded hypotheses below).
+#### Run made 2026-07-21 — prediction held, and split the problem in two
+
+`LRI_WARP_FLIP=flag_false|flag_true` in `light validate` right-composes a
+source-coordinate flip (`y ↦ (h−1) − y`) onto the homography for the selected
+modules. Default off; no shipped behaviour depends on it.
+
+The prediction hit exactly: B1 → **+0.349** and B5 → **+0.315** on `00078`, and
+B2/B3/C2/C4 did not move by a single digit. Running the *inverse* (flip the
+`flag = true` modules) breaks B2/B3 just as hard — +0.44 → −0.15 and +0.34 →
+−0.26 on the same capture.
+
+| | flag | parity only | + flip flag=false | + flip flag=true |
+| --- | --- | --- | --- | --- |
+| B1 `00078` | false | −0.262 | **+0.349** | −0.262 |
+| B5 `00078` | false | −0.258 | **+0.315** | −0.258 |
+| B2 `00078` | true | +0.442 | +0.442 | **−0.151** |
+| B3 `00078` | true | +0.345 | +0.345 | **−0.258** |
+
+**For the B row this is settled: the image needs flipping exactly when
+`flip_img_around_x` is false.** Consistent across all five captures, and the
+magnitudes on `00078` (|0.3|) put it far outside noise. Note what that means —
+the flag reads as a statement about how the sensor image *already arrives*, not
+as an instruction to flip it.
+
+#### Why this is not yet wired in
+
+The C row does not follow the same rule, and the C numbers are too weak to
+establish any rule at all. C2 — one of the two "proper yet negative, unexplained"
+modules — turns positive under `flag_true` (−0.082 → +0.090 on `00003`, −0.055 →
++0.038 on `00045`), its first movement ever. But C1 and C3 get worse under
+`flag_false` on `00003` and C3 gets *better* on `00045`: the sign is not stable
+across captures, at |NCC| < 0.07 throughout.
+
+That is the instrument failing, not a subtle law. C modules overlap the B4
+reference by only ~20 % of the canvas and, per `PATENTS.md`, aim at a different
+part of the scene entirely — `light grid` shows it plainly. NCC against B4 cannot
+adjudicate a flip hypothesis under those conditions.
+
+So: **do not encode "flip when flag is false" yet**, and above all do not encode
+a per-row exception to it. Fitting a rule to the C row on |0.06| numbers from one
+camera is precisely the mistake that produced the original defect. What the B row
+establishes is that the *mechanism* is right; the open part is whether one rule
+covers all eight mirror modules.
+
+#### Next
+
+1. Fix C pointing first (§1a). Until a C module lands on the same scene content
+   as the reference, its NCC is not a measurement.
+2. Then re-run the same two-config experiment on the C row. If one rule covers
+   all eight, wire it in and delete the env switch.
+3. If the rows genuinely disagree, that is the sharpened RE question for
+   `0x1c7580`: *what does the engine key the image flip on, given parity is
+   already handled and the flag alone does not cover both rows?*
 
 ### Guard now in place
 
