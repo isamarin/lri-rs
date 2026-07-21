@@ -9,5 +9,6 @@
 .env
 .idea/
 
-# Internal plan — outreach, timing, exposure notes. Local only.
+# Internal plan — outreach, timing, exposure notes.
+# Lives in the private repo isamarin/relight, not here.
 /RE-LIGHT.md

@@ -255,6 +255,49 @@ When working on fusion:
 
 ## Log
 
+### 2026-07-21 — Parallax measured: a single plane is worth ~20 %, not the gap
+
+**Confidence:** confirmed (real capture `L16_00003`, 40-step sweep, two preview scales)
+**Source:** `light validate --depth-steps 40`, `openfusion::warp::homography_at_depth`
+**Finding:** `validate` can now sweep the plane depth per module (uniform in
+**inverse** depth, since disparity is linear in `1/Z`) and report the best NCC
+with the depth that achieved it, alongside the infinity-homography number.
+
+| module | ∞ @1024 | swept @1024 | depth | ∞ @128 |
+| --- | --- | --- | --- | --- |
+| C5 | +0.243 | +0.293 | **17.8 m** | +0.679 |
+| C6 | +0.146 | +0.194 | **17.8 m** | +0.412 |
+| B3 | +0.326 | +0.340 | 2.4 m | +0.653 |
+| B2 | +0.286 | +0.330 | 2.4 m | +0.584 |
+| B5 | +0.059 | +0.104 | 1.0 m | +0.129 |
+| B1 | +0.068 | +0.100 | 9.3 m | +0.163 |
+| C2 | −0.082 | +0.014 | 0.5 m ← rail | −0.252 |
+| C3 | +0.012 | +0.011 | 200 m ← rail | +0.027 |
+| C4 | −0.007 | −0.007 | 3.2 m | −0.021 |
+
+Two things fall out. **C5 and C6 independently peak at 17.8 m** at both 512 and
+1024 preview — two modules, separate poses, same answer, and it matches the tree
+line visible in `light grid`. That is the depth machinery and those two poses
+validating each other, which is the first non-circular confirmation either has
+had.
+
+And the size of the prize is now known: a single fronto-parallel plane buys
+**+0.05 to +0.12 NCC**, roughly 20 % relative. Coarsening the preview from 1024
+to 128 buys far more (C5 +0.243 → +0.679). Both suppress parallax, but only
+resolution suppresses *depth variation within the frame* — so the dominant
+residual is per-pixel depth, exactly what `RE-LIGHT` Phase 3 predicted. One
+plane is not the fix; it is a fifth of the fix.
+
+**Implication:** parallax was the right suspect for the low absolute scores but
+does **not** explain C2 and C4. Both sit at a sweep rail or refuse to move —
+depth cannot rescue a wrong pose, and their problem remains open (OPEN-QUESTIONS
+§1c). Modules that rail to 0.5 m or 200 m found no interior optimum at all; treat
+a railed depth as "no answer", not as a measurement.
+
+**Follow-up:** [ ] per-pixel depth rather than one plane; [ ] use the C5/C6 17.8 m
+agreement as a seed and a regression fixture; [ ] revisit `tof:0.00` (#3) now that
+a scene distance is independently known.
+
 ### 2026-07-19 — First working fused frame (healthy triple B4+B2+B3)
 
 **Confidence:** confirmed (visual + NCC on real capture L16_00003)

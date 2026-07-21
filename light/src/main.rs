@@ -40,6 +40,11 @@ enum Command {
 		/// Longest preview side in pixels (default 1024)
 		#[arg(long, default_value_t = 1024)]
 		max_side: u32,
+		/// Sweep plane depth per module and report the best NCC and its depth.
+		/// 0 = infinity homography only. The gap between the two is how much of
+		/// a module's error was parallax rather than pose.
+		#[arg(long, default_value_t = 0)]
+		depth_steps: usize,
 	},
 	/// Luminat fuse: undistort, depth warp, blend; optional full-res TIFF/DNG + crop
 	Fuse {
@@ -98,7 +103,8 @@ fn main() -> Result<()> {
 			lumen,
 			output,
 			max_side,
-		} => validate_rt::run(&lri, lumen.as_deref(), &output, max_side),
+			depth_steps,
+		} => validate_rt::run(&lri, lumen.as_deref(), &output, max_side, depth_steps),
 		Command::Fuse {
 			lri,
 			output,

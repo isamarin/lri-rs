@@ -34,6 +34,11 @@ pub struct ModuleValidate {
 	pub overlay_ncc: Option<f64>,
 	pub lumen_mae: Option<f64>,
 	pub lumen_ncc: Option<f64>,
+	/// Best NCC found over the depth sweep, and the depth in mm that gave it.
+	/// `None` unless a sweep was requested. The gap between this and
+	/// `overlay_ncc` is the part of the error that was the infinity assumption.
+	pub swept_ncc: Option<f64>,
+	pub swept_depth_mm: Option<f64>,
 }
 
 /// Validate R/t by warping every module onto the reference and scoring the overlap.
@@ -49,9 +54,10 @@ pub fn run(
 	lumen_jpg: Option<&Utf8Path>,
 	output: &Utf8Path,
 	max_side: u32,
+	depth_steps: usize,
 ) -> Result<()> {
 	let session = LriSession::open(lri_path)?;
-	session.with_lri(|lri| run_decoded(lri, lumen_jpg, output, max_side))
+	session.with_lri(|lri| run_decoded(lri, lumen_jpg, output, max_side, depth_steps))
 }
 
 fn run_decoded(
@@ -59,6 +65,7 @@ fn run_decoded(
 	lumen_jpg: Option<&Utf8Path>,
 	output: &Utf8Path,
 	max_side: u32,
+	depth_steps: usize,
 ) -> Result<()> {
 	if !output.exists() {
 		fs::create_dir_all(output).context("create output directory")?;
@@ -121,6 +128,8 @@ fn run_decoded(
 				overlay_ncc: Some(1.0),
 				lumen_mae: lumen_fit.as_ref().map(|_| 0.0),
 				lumen_ncc: lumen_fit.as_ref().map(|_| 1.0),
+				swept_ncc: None,
+				swept_depth_mm: None,
 			});
 			continue;
 		}
@@ -136,11 +145,27 @@ fn run_decoded(
 		let r_src = mat3(sel.rotation.unwrap_or(identity9()));
 		let t_src = vec3(sel.translation.unwrap_or([0.0; 3]));
 
+		let flip = flip_experiment
+			.applies_to(sel)
+			.then(|| flip_y_in_source(src_img.height()));
 		let mut h = homography_infinity(&ref_k, &ref_r, &ref_t, &k_src, &r_src, &t_src);
-		if flip_experiment.applies_to(sel) {
-			h *= flip_y_in_source(src_img.height());
+		if let Some(f) = flip {
+			h *= f;
 		}
 		let warped = warp_inverse(&src_img, &h, ref_w, ref_h);
+
+		// Optional: how much of this module's error was parallax, not pose.
+		let swept = (depth_steps > 0).then(|| {
+			sweep_depth(
+				&src_img,
+				&ref_img,
+				(&ref_k, &ref_r, &ref_t),
+				(&k_src, &r_src, &t_src),
+				flip.as_ref(),
+				depth_steps,
+				(ref_w, ref_h),
+			)
+		});
 		accumulate_masked(&mut blend_acc, &mut blend_w, &warped);
 
 		let (mae, ncc, overlap) = compare_overlap(&warped, &ref_img);
@@ -162,14 +187,20 @@ fn run_decoded(
 			overlay_ncc: Some(ncc),
 			lumen_mae,
 			lumen_ncc,
+			swept_ncc: swept.map(|(n, _)| n),
+			swept_depth_mm: swept.map(|(_, d)| d),
 		});
 
 		let lumen_col = match lumen_ncc {
 			Some(v) => format!(" lumen_ncc={v:.4}"),
 			None => String::new(),
 		};
+		let swept_col = match swept {
+			Some((n, d)) => format!(" swept={n:+.4}@{:.1}m", d / 1000.0),
+			None => String::new(),
+		};
 		eprintln!(
-			"  {camera} → {ref_cam}: overlap={overlap} ref_ncc={ncc:+.4}{lumen_col} mir={}",
+			"  {camera} → {ref_cam}: overlap={overlap} ref_ncc={ncc:+.4}{swept_col}{lumen_col} mir={}",
 			sel.has_movable_mirror
 		);
 	}
@@ -252,6 +283,58 @@ fn scaled_k(k: [f32; 9], step: usize) -> Matrix3<f64> {
 }
 
 /// Planar homography at infinity: x_ref ~ K_ref (R_ref R_src^T) K_src^-1 x_src.
+/// Best NCC over a plane sweep, and the depth that achieved it.
+///
+/// `homography_infinity` places every module at infinity, which throws away all
+/// parallax — and parallax in pixels scales with `fx`, so the tele rows pay for
+/// it several times over what the wide row does. Sweeping the plane depth says
+/// how much of a module's error was that assumption rather than its pose.
+///
+/// Sampled uniformly in **inverse** depth: disparity is linear in `1/Z`, so a
+/// linear sweep in `Z` would spend most of its steps where nothing changes.
+fn sweep_depth(
+	src_img: &GrayImage,
+	ref_img: &GrayImage,
+	reference: (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>),
+	source: (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>),
+	flip: Option<&Matrix3<f64>>,
+	steps: usize,
+	canvas: (u32, u32),
+) -> (f64, f64) {
+	use openfusion::warp::{homography_at_depth, CameraPose};
+
+	let pose = |(k, r, t): (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>)| CameraPose {
+		k: *k,
+		r: *r,
+		t: *t,
+	};
+	let (dst, src) = (pose(reference), pose(source));
+
+	// 0.5 m to 200 m. Below half a metre nothing in these captures lives; above
+	// 200 m the homography is indistinguishable from the infinity one.
+	const NEAR_MM: f64 = 500.0;
+	const FAR_MM: f64 = 200_000.0;
+
+	let mut best = (f64::NEG_INFINITY, f64::INFINITY);
+	for i in 0..steps {
+		let f = i as f64 / (steps - 1).max(1) as f64;
+		let inv = (1.0 / NEAR_MM) + f * ((1.0 / FAR_MM) - (1.0 / NEAR_MM));
+		let depth = 1.0 / inv;
+
+		let mut h = homography_at_depth(&src, &dst, depth);
+		if let Some(f) = flip {
+			h *= f;
+		}
+		let warped = warp_inverse(src_img, &h, canvas.0, canvas.1);
+		let (_, ncc, overlap) = compare_overlap(&warped, ref_img);
+		// A sliver of overlap can score high on noise alone; require real support.
+		if overlap > canvas.0 * canvas.1 / 20 && ncc > best.0 {
+			best = (ncc, depth);
+		}
+	}
+	best
+}
+
 /// Which mirror modules get a warp-time image flip. Experiment, default off.
 ///
 /// `flip_img_around_x` no longer affects `R` (it used to, by accident — see
@@ -610,6 +693,7 @@ mod tests {
 			None,
 			tmp.as_path().try_into().expect("utf8"),
 			256,
+			0,
 		)
 		.expect("validate run without lumen");
 
@@ -643,6 +727,7 @@ mod tests {
 			Some(lumen_path.as_path().try_into().expect("utf8")),
 			tmp.as_path().try_into().expect("utf8"),
 			256,
+			0,
 		)
 		.expect("validate run");
 		let summary_path = tmp.join("validate.json");
