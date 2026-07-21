@@ -1,8 +1,22 @@
 # lri-rs
 
-Rust workspace for **Light L16** `.lri` (Light Raw Image) files — parse, survey, export per-camera RAW, and research the Lumen 16→1 fusion pipeline.
+**Get your photos out of a Light L16.**
 
-Fork maintained by **isamarin × BLMK**. Version: **CalVer** (`YYYY.M.D`) — see `VERSION` and `./scripts/calver`.
+The camera shipped in 2017, was abandoned in 2019, and its maker no longer
+exists. The desktop software that turned `.lri` files into pictures went with it.
+The hardware still powers on, and the files are still on the card.
+
+This gets sixteen RAW frames out of every capture, as DNG, opening in Lightroom
+or anything else that reads DNG — no LightOS, no account, no permission. It runs
+on the command line or as a desktop app.
+
+Fusing those sixteen back into one image the way Lumen did is a separate,
+unfinished thing; see [FUSION.md](FUSION.md) for how far it has got and
+[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) for what is still wrong with it. Extraction
+is the part that works, and it is what most owners want.
+
+Fork maintained by **isamarin × BLMK**, from [gennyble/lri-rs](https://github.com/gennyble/lri-rs).
+Version: **CalVer** (`YYYY.M.D`) — see `VERSION` and `./scripts/calver`.
 
 ## Quick start
 
@@ -59,6 +73,7 @@ Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in
 - [LRI.md](LRI.md) — block format, cameras, colour calibration
 - [bayer_jpeg.md](bayer_jpeg.md) — BJPG container
 - [FUSION.md](FUSION.md) — Lumen combine research log (geometry, depth, blend) — **living doc for humans and agents**
+- [COMPATIBILITY.md](COMPATIBILITY.md) — which cameras this has been run on. **If you own an L16, add a row** — everything here was derived from a single unit, and that is the project's biggest weakness
 - [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) — open worklist, most important first; start here to pick something up
 - [PATENTS.md](PATENTS.md) — what Light's patents do and do not disclose. **Read before attacking geometry:** they give *structure* (three mirror classes, hinge-axis constraints) and never mechanics, and knowing which is which saves days
 ## Library example
@@ -157,7 +172,13 @@ git submodule update --init
 ## Credits
 
 - Original parser & docs — [gennyble](https://github.com/nyble) / [dllu/lri-rs](https://github.com/dllu/lri-rs)
+- Archived L16 material (`vendor/light-l16/`) — forked from [helloavo/Light-L16-Archive](https://github.com/helloavo/Light-L16-Archive), preserved by the owner community after Light shut down
 - This fork — **isamarin × BLMK**
+
+What is ours, specifically: the fusion research (`FUSION.md`, `PATENTS.md`,
+`OPEN-QUESTIONS.md`), the mirror-pose and geometry work, DNG/TIFF export, the
+Tauri GUI, and the diagnostic examples under `light/examples/`. The `.lri`
+container parser is gennyble's, extended.
 
 ## Licensing
 

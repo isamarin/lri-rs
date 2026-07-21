@@ -496,10 +496,29 @@ git submodule add https://github.com/isamarin/openfusion openfusion
 git commit -m "extract openfusion fusion-geometry crate as submodule"
 ```
 
-## 6. Dataset hygiene
+## 6. Dataset hygiene — cleared 2026-07-21
 
-61 captures in `.data-from-camera/raw/` (gitignored). Before any public release,
-strip GPS blocks and screen recognizable locations.
+61 captures in `.data-from-camera/raw/` (gitignored). The worry was a live GPS
+fix: the camera app writes one into a trailing `LELR` block (`TYPE_GPS_DATA = 2`,
+`FUSION.md`), so sample captures could hand a stranger the owner's address along
+with the test data.
+
+**There is none.** Three independent checks over all 62 files agree:
+
+| check | result |
+| --- | --- |
+| `FusionMeta.gps` after decode (`privacy_scan` example) | 0 of 62 |
+| raw scan for trailing `LELR` blocks with `type = 2` | 0 — only 247 × type 0, 2 × type 1 |
+| `Exif\0\0` + GPS IFD pointer (`0x8825`) in the container | no EXIF at all in any file |
+
+Checked three ways on purpose. A parser that quietly skips a block would report
+a clean result for the worst possible reason, and this is the one question where
+a false all-clear does the damage.
+
+So nothing needs stripping before publishing samples from *this* set. Keep
+`privacy_scan` and re-run it on any capture arriving from an owner — location
+services were evidently off on this camera, which is a property of these files,
+not of the format.
 
 ---
 
