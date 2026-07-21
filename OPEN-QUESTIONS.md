@@ -10,6 +10,13 @@ worklist, most important first.
 (healthy module triple). Work is on branch `openfusion-extract`, committed
 locally, **not pushed** (owner does not want this public yet).
 
+That firmware directory (46 MB: `libcp.so`, `libcp.dylib`, both APKs) is
+untracked **by decision, not by omission** — it is the redistribution exposure
+called out in RE-LIGHT Phase 0.2, and the camera IP has sat with Samsung since
+2021 (`PATENTS.md`). It is in the submodule's local `info/exclude` so a stray
+`git add -A` cannot stage it. Publishing it is a deliberate call to make with a
+clear head; until then it stays on this machine.
+
 ---
 
 ## 1. Mirror pose — ROOT CAUSE FOUND (2026-07-21)
