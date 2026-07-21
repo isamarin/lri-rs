@@ -1,0 +1,91 @@
+Copyright and licensing
+=======================
+
+This workspace combines code from three copyright holders. The combined work is
+distributed under the **GNU Affero General Public License v3.0 or later** — full
+text in [LICENSE](LICENSE).
+
+  fork changes       AGPL-3.0-or-later  Copyright (c) 2026 isamarin × BLMK
+  upstream crates    ISC                Copyright (c) gennyble <gen@nyble.dev>
+  lri-proto/         MIT                Copyright (c) Daniel Lawrence Lu
+
+ISC and MIT are both GPL-compatible, so the combination is lawful and the
+copyleft applies to the work as a whole. The ISC and MIT notices below remain in
+force for their respective parts and must travel with them; nothing here revokes
+or replaces them, and anyone is free to take those upstream components from
+their original sources under their original terms.
+
+
+Why AGPL
+--------
+
+The point is not to forbid use. Use it, study it, fork it, run it on anything.
+
+The point is that it cannot be **enclosed**. Distribute a modified version and
+the source goes with it — and under §13, that holds for network services too, so
+"we host it, you rent it, source stays ours" is not available either. Plain GPL
+leaves that door open; AGPL does not.
+
+This camera was abandoned by the company that built it and kept alive for years
+by the people who owned one. What that community rebuilt should not be closed
+back up by anybody — us included.
+
+Two consequences worth knowing before you build on this:
+
+- AGPL code cannot be merged back into `gennyble/lri-rs`, which is ISC. Anything
+  offered upstream has to be limited to changes we can also release under ISC.
+- Some organisations ban AGPL dependencies outright. That is a deliberate trade:
+  reach given up in exchange for the guarantee above.
+
+
+Upstream notices
+----------------
+
+ISC — upstream crates (lri-rs, light, and code derived from them)
+https://github.com/gennyble/lri-rs
+
+  Copyright (c) gennyble <gen@nyble.dev>
+
+  Permission to use, copy, modify, and/or distribute this software for any
+  purpose with or without fee is hereby granted, provided that the above
+  copyright notice and this permission notice appear in all copies.
+
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+  REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+  INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+  LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+  PERFORMANCE OF THIS SOFTWARE.
+
+
+MIT — lri-proto/
+
+  Copyright (c) Daniel Lawrence Lu
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+
+Not covered here
+----------------
+
+`vendor/light-l16/` is a submodule of archived Light L16 material — firmware,
+the stock application, documentation. Those are preserved copies kept because
+the originals are vanishing from the internet; rights remain with their original
+holders. Nothing in this file or in LICENSE grants any right to them.

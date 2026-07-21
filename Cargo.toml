@@ -6,6 +6,10 @@ resolver = "2"
 version = "2026.7.14"
 edition = "2021"
 authors = ["isamarin × BLMK"]
+# Composite tree: fork changes AGPL-3.0-or-later, upstream (gennyble) ISC,
+# lri-proto MIT. ISC and MIT are AGPL-compatible, so the whole is AGPL.
+# Per-component notices in COPYRIGHT.
+license = "AGPL-3.0-or-later"
 
 [profile.release]
 opt-level = 3

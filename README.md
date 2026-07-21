@@ -59,6 +59,9 @@ Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in
 - [LRI.md](LRI.md) — block format, cameras, colour calibration
 - [bayer_jpeg.md](bayer_jpeg.md) — BJPG container
 - [FUSION.md](FUSION.md) — Lumen combine research log (geometry, depth, blend) — **living doc for humans and agents**
+- [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) — open worklist, most important first; start here to pick something up
+- [PATENTS.md](PATENTS.md) — what Light's patents do and do not disclose. **Read before attacking geometry:** they give *structure* (three mirror classes, hinge-axis constraints) and never mechanics, and knowing which is which saves days
+- [RE-LIGHT.md](RE-LIGHT.md) — the plan: phases, gates, and where this is meant to end up
 
 ## Library example
 
@@ -160,6 +163,23 @@ git submodule update --init
 
 ## Licensing
 
-- `lri-proto` — MIT, Daniel Lawrence Lu
+The workspace as a whole is **AGPL-3.0-or-later** — [LICENSE](LICENSE).
+Per-component notices and the reasoning: [COPYRIGHT](COPYRIGHT).
+
+- **Fork changes — AGPL-3.0-or-later, isamarin × BLMK**
 - Upstream crates (`lri-rs`, `light`, …) — ISC, gennyble \<gen@nyble.dev\>
-- Fork changes — isamarin × BLMK
+- `lri-proto` — MIT, Daniel Lawrence Lu
+
+Use it, fork it, run it, charge for it. The one thing you cannot do is close it:
+ship a modified version — or a network service built on it (§13) — and the
+source goes with it. This camera was abandoned by its maker and kept alive by
+the people who owned one; what they rebuilt should not be enclosed by anyone,
+us included.
+
+Note for contributors: AGPL code cannot be merged back into the ISC upstream, so
+anything offered to `gennyble/lri-rs` has to be limited to changes we can also
+release under ISC.
+
+`vendor/light-l16/` is outside all of this: archived Light L16 material
+(firmware, stock app, docs) preserved because the originals are disappearing.
+Rights there remain with the original holders.
