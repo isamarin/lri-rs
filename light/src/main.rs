@@ -30,9 +30,10 @@ enum Command {
 		/// Input .lri file
 		#[arg(long)]
 		lri: camino::Utf8PathBuf,
-		/// Lumen fused output .jpg
+		/// Lumen fused output .jpg — optional; without it, per-module NCC
+		/// against the reference module still runs, on any capture
 		#[arg(long)]
-		lumen: camino::Utf8PathBuf,
+		lumen: Option<camino::Utf8PathBuf>,
 		/// Output directory for overlays and metrics
 		#[arg(short, long)]
 		output: camino::Utf8PathBuf,
@@ -97,7 +98,7 @@ fn main() -> Result<()> {
 			lumen,
 			output,
 			max_side,
-		} => validate_rt::run(&lri, &lumen, &output, max_side),
+		} => validate_rt::run(&lri, lumen.as_deref(), &output, max_side),
 		Command::Fuse {
 			lri,
 			output,

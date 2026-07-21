@@ -15,9 +15,12 @@ pub struct ValidateSummary {
 	pub reference_camera: String,
 	pub preview_max_side: u32,
 	pub canvas: [u32; 2],
-	pub lumen_size: [u32; 2],
-	pub blend_mae_vs_lumen: f64,
-	pub blend_ncc_vs_lumen: f64,
+	/// `None` without a Lumen reference — the per-module `overlay_ncc` numbers
+	/// below are still computed, since those compare against our own reference
+	/// module rather than against Lumen.
+	pub lumen_size: Option<[u32; 2]>,
+	pub blend_mae_vs_lumen: Option<f64>,
+	pub blend_ncc_vs_lumen: Option<f64>,
 	pub modules: Vec<ModuleValidate>,
 }
 
@@ -33,9 +36,17 @@ pub struct ModuleValidate {
 	pub lumen_ncc: Option<f64>,
 }
 
+/// Validate R/t by warping every module onto the reference and scoring the overlap.
+///
+/// `lumen_jpg` is optional. With it you also get each module scored against
+/// Lumen's own render, which is the stronger check — but that reference exists
+/// for a single capture. Without it the per-module `overlay_ncc` against our
+/// reference module still runs, and it runs on any of the captures on hand.
+/// A geometry claim has to hold across captures, so being able to sweep them
+/// matters more than the extra reference on one.
 pub fn run(
 	lri_path: &Utf8Path,
-	lumen_jpg: &Utf8Path,
+	lumen_jpg: Option<&Utf8Path>,
 	output: &Utf8Path,
 	max_side: u32,
 ) -> Result<()> {
@@ -45,7 +56,7 @@ pub fn run(
 
 fn run_decoded(
 	lri: &LriFile<'_>,
-	lumen_jpg: &Utf8Path,
+	lumen_jpg: Option<&Utf8Path>,
 	output: &Utf8Path,
 	max_side: u32,
 ) -> Result<()> {
@@ -86,8 +97,8 @@ fn run_decoded(
 	let mut blend_w = vec![0u32; (ref_w * ref_h) as usize];
 	accumulate(&mut blend_acc, &mut blend_w, &ref_img, 1.0);
 
-	let lumen = load_lumen_gray(lumen_jpg)?;
-	let lumen_fit = resize_gray(&lumen, ref_w, ref_h);
+	let lumen = lumen_jpg.map(load_lumen_gray).transpose()?;
+	let lumen_fit = lumen.as_ref().map(|l| resize_gray(l, ref_w, ref_h));
 
 	let overlay_dir = output.join("overlays");
 	fs::create_dir_all(&overlay_dir).context("create overlays directory")?;
@@ -103,8 +114,8 @@ fn run_decoded(
 				overlap_pixels: ref_w * ref_h,
 				overlay_mae: Some(0.0),
 				overlay_ncc: Some(1.0),
-				lumen_mae: Some(0.0),
-				lumen_ncc: Some(1.0),
+				lumen_mae: lumen_fit.as_ref().map(|_| 0.0),
+				lumen_ncc: lumen_fit.as_ref().map(|_| 1.0),
 			});
 			continue;
 		}
@@ -125,7 +136,11 @@ fn run_decoded(
 		accumulate_masked(&mut blend_acc, &mut blend_w, &warped);
 
 		let (mae, ncc, overlap) = compare_overlap(&warped, &ref_img);
-		let (lumen_mae, lumen_ncc, _) = compare_overlap(&warped, &lumen_fit);
+		let against_lumen = lumen_fit
+			.as_ref()
+			.map(|l| compare_overlap(&warped, l));
+		let lumen_mae = against_lumen.map(|(m, _, _)| m);
+		let lumen_ncc = against_lumen.map(|(_, n, _)| n);
 		let overlay = blend_overlay(&ref_img, &warped, 0.45);
 		let overlay_path = overlay_dir.join(format!("{camera}_on_{ref_cam}.png"));
 		write_gray_png(&overlay_path, &overlay)?;
@@ -137,34 +152,41 @@ fn run_decoded(
 			overlap_pixels: overlap,
 			overlay_mae: Some(mae),
 			overlay_ncc: Some(ncc),
-			lumen_mae: Some(lumen_mae),
-			lumen_ncc: Some(lumen_ncc),
+			lumen_mae,
+			lumen_ncc,
 		});
 
+		let lumen_col = match lumen_ncc {
+			Some(v) => format!(" lumen_ncc={v:.4}"),
+			None => String::new(),
+		};
 		eprintln!(
-			"  {camera} → {ref_cam}: overlap={overlap} ref_ncc={ncc:.4} lumen_ncc={lumen_ncc:.4} mir={}",
+			"  {camera} → {ref_cam}: overlap={overlap} ref_ncc={ncc:+.4}{lumen_col} mir={}",
 			sel.has_movable_mirror
 		);
 	}
 
 	let our_blend = normalize_blend(&blend_acc, &blend_w, ref_w, ref_h);
-	let diff = abs_diff(&our_blend, &lumen_fit);
-	let (blend_mae, blend_ncc, _) = compare_overlap(&our_blend, &lumen_fit);
-
 	write_gray_png(&output.join("our_blend.png"), &our_blend)?;
-	write_gray_png(&output.join("lumen_resized.png"), &lumen_fit)?;
-	write_gray_png(&output.join("diff.png"), &diff)?;
-	write_side_by_side(
-		&output.join("side_by_side.png"),
-		&our_blend,
-		&lumen_fit,
-	)?;
+
+	let mut blend_mae = None;
+	let mut blend_ncc = None;
+	if let Some(lumen_fit) = &lumen_fit {
+		let diff = abs_diff(&our_blend, lumen_fit);
+		let (mae, ncc, _) = compare_overlap(&our_blend, lumen_fit);
+		blend_mae = Some(mae);
+		blend_ncc = Some(ncc);
+
+		write_gray_png(&output.join("lumen_resized.png"), lumen_fit)?;
+		write_gray_png(&output.join("diff.png"), &diff)?;
+		write_side_by_side(&output.join("side_by_side.png"), &our_blend, lumen_fit)?;
+	}
 
 	let summary = ValidateSummary {
 		reference_camera: ref_cam.to_string(),
 		preview_max_side: max_side,
 		canvas: [ref_w, ref_h],
-		lumen_size: [lumen.0, lumen.1],
+		lumen_size: lumen.as_ref().map(|l| [l.0, l.1]),
 		blend_mae_vs_lumen: blend_mae,
 		blend_ncc_vs_lumen: blend_ncc,
 		modules,
@@ -177,13 +199,13 @@ fn run_decoded(
 	)
 	.context("write validate.json")?;
 
-	eprintln!(
-		"blend vs lumen: mae={blend_mae:.2} ncc={blend_ncc:.4} ({}x{} → {}x{})",
-		lumen.0,
-		lumen.1,
-		ref_w,
-		ref_h
-	);
+	match (&lumen, blend_mae, blend_ncc) {
+		(Some(l), Some(mae), Some(ncc)) => eprintln!(
+			"blend vs lumen: mae={mae:.2} ncc={ncc:.4} ({}x{} → {ref_w}x{ref_h})",
+			l.0, l.1
+		),
+		_ => eprintln!("no lumen reference — per-module ncc vs {ref_cam} only"),
+	}
 	eprintln!("wrote {summary_path}");
 
 	Ok(())
@@ -512,6 +534,40 @@ mod tests {
 		assert_eq!(diff.get_pixel(1, 1)[0], 0);
 	}
 
+	/// Without a Lumen reference the run must still produce per-module numbers.
+	///
+	/// This is the path that makes a geometry claim checkable across captures
+	/// instead of on the one capture Lumen ever rendered for us.
+	#[test]
+	fn l16_validate_without_lumen_still_scores_modules() {
+		let Some(lri_path) = lri_rs::fixtures::l16_00078_path() else {
+			return;
+		};
+		let tmp = std::env::temp_dir().join("light_validate_no_lumen_test");
+		let _ = std::fs::remove_dir_all(&tmp);
+		run(
+			lri_path.as_path().try_into().expect("utf8"),
+			None,
+			tmp.as_path().try_into().expect("utf8"),
+			256,
+		)
+		.expect("validate run without lumen");
+
+		let summary: ValidateSummary =
+			serde_json::from_str(&std::fs::read_to_string(tmp.join("validate.json")).unwrap())
+				.unwrap();
+		assert!(summary.lumen_size.is_none());
+		assert!(summary.blend_ncc_vs_lumen.is_none());
+		assert!(summary.modules.iter().all(|m| m.lumen_ncc.is_none()));
+		// The point of the run: reference-relative scores are all still there.
+		assert!(summary.modules.len() > 1);
+		assert!(summary.modules.iter().all(|m| m.overlay_ncc.is_some()));
+		assert!(tmp.join("our_blend.png").exists());
+		// Lumen-only artefacts must not be written from thin air.
+		assert!(!tmp.join("lumen_resized.png").exists());
+		assert!(!tmp.join("side_by_side.png").exists());
+	}
+
 	#[test]
 	fn l16_validate_end_to_end_when_fixtures_present() {
 		let Some(lri_path) = lri_rs::fixtures::l16_00078_path() else {
@@ -524,7 +580,7 @@ mod tests {
 		let _ = std::fs::remove_dir_all(&tmp);
 		run(
 			lri_path.as_path().try_into().expect("utf8"),
-			lumen_path.as_path().try_into().expect("utf8"),
+			Some(lumen_path.as_path().try_into().expect("utf8")),
 			tmp.as_path().try_into().expect("utf8"),
 			256,
 		)
@@ -533,7 +589,7 @@ mod tests {
 		let summary: ValidateSummary =
 			serde_json::from_str(&std::fs::read_to_string(summary_path).unwrap()).unwrap();
 		assert_eq!(summary.reference_camera, "A1");
-		assert!(summary.blend_ncc_vs_lumen > 0.0);
+		assert!(summary.blend_ncc_vs_lumen.expect("lumen supplied") > 0.0);
 		assert_eq!(summary.modules.len(), 10);
 		assert!(summary.modules.iter().any(|m| m.has_movable_mirror));
 		let b2 = summary.modules.iter().find(|m| m.camera == "B2").expect("B2");
