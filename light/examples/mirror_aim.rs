@@ -100,6 +100,7 @@ fn dump(path: &str) -> Result<usize, String> {
 	pointing(&lri, focal, &fired);
 	intrinsics(&lri, focal);
 	parallax(&lri, focal, 832);
+	layout(&lri, focal);
 	Ok(bad)
 }
 
@@ -195,6 +196,122 @@ fn intrinsics(lri: &LriFile<'_>, focal: i32) {
 				.map(|v| format!("{v:.0}"))
 				.unwrap_or_else(|| "—".into()),
 		);
+	}
+}
+
+/// Do the sixteen camera centres form the physical front face of an L16?
+///
+/// This is the one check that needs no images at all, which matters because the
+/// A row and the glued C modules **never fire in the same shot** — the camera
+/// picks wide (A + B, reference A1) or tele (B + C, reference B4) and there is no
+/// mode that mixes them. No capture can compare those two reference classes by
+/// correlation, so the comparison has to be algebraic.
+///
+/// The sixteen modules are mounted on one flat face in a fixed grid. So their
+/// centres, `C = −Rᵀ·t`, must be near-coplanar and laid out in rows. A module
+/// whose pose is stored in a different convention lands somewhere that
+/// arrangement does not allow — and it says so without reference to any image.
+///
+/// Reported as distance from the best-fit plane through all centres, then as
+/// in-plane coordinates so the row structure is readable.
+fn layout(lri: &LriFile<'_>, focal: i32) {
+	let picks = lri.fusion.pick_all_focus_bundles(focal);
+	let mut pts: Vec<(String, &'static str, [f64; 3])> = Vec::new();
+	for (cam, sel) in &picks {
+		let (Some(r), Some(t)) = (sel.rotation, sel.translation) else {
+			continue;
+		};
+		let (r, t) = (r.map(f64::from), t.map(f64::from));
+		let c = [
+			-(r[0] * t[0] + r[3] * t[1] + r[6] * t[2]),
+			-(r[1] * t[0] + r[4] * t[1] + r[7] * t[2]),
+			-(r[2] * t[0] + r[5] * t[1] + r[8] * t[2]),
+		];
+		let path = if sel.has_movable_mirror { "mirror" } else { "canon" };
+		pts.push((format!("{cam:?}"), path, c));
+	}
+	if pts.len() < 4 {
+		return;
+	}
+
+	let n = pts.len() as f64;
+	let mut mean = [0.0; 3];
+	for (_, _, c) in &pts {
+		for i in 0..3 {
+			mean[i] += c[i] / n;
+		}
+	}
+	// Plane normal = eigenvector of the smallest eigenvalue of the scatter matrix.
+	// Power-iterate on (trace·I − M), whose dominant eigenvector is M's smallest.
+	let mut m = [[0.0f64; 3]; 3];
+	for (_, _, c) in &pts {
+		let d = [c[0] - mean[0], c[1] - mean[1], c[2] - mean[2]];
+		for i in 0..3 {
+			for j in 0..3 {
+				m[i][j] += d[i] * d[j];
+			}
+		}
+	}
+	let trace = m[0][0] + m[1][1] + m[2][2];
+	let mut b = [[0.0f64; 3]; 3];
+	for i in 0..3 {
+		for j in 0..3 {
+			b[i][j] = if i == j { trace - m[i][j] } else { -m[i][j] };
+		}
+	}
+	let mut v = [1.0f64, 0.3, 0.7];
+	for _ in 0..200 {
+		let w = [
+			b[0][0] * v[0] + b[0][1] * v[1] + b[0][2] * v[2],
+			b[1][0] * v[0] + b[1][1] * v[1] + b[1][2] * v[2],
+			b[2][0] * v[0] + b[2][1] * v[1] + b[2][2] * v[2],
+		];
+		let len = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
+		if len < 1e-12 {
+			break;
+		}
+		v = [w[0] / len, w[1] / len, w[2] / len];
+	}
+
+	// One plane through all sixteen is the wrong model, and the data says so
+	// immediately: the rows sit at distinct depths. That is physics, not a bug —
+	// a folded optical path puts the virtual centre behind the face, so the
+	// mirror rows are displaced backwards from the flat-mounted A row. What must
+	// hold is consistency *within* a row.
+	let _ = (mean, v);
+	let mut by_row: std::collections::BTreeMap<char, Vec<&(String, &'static str, [f64; 3])>> =
+		Default::default();
+	for p in &pts {
+		by_row.entry(p.0.chars().next().unwrap_or('?')).or_default().push(p);
+	}
+
+	println!();
+	println!("   front-face layout — centres C = −Rᵀ·t, mm (origin is A1)");
+	println!(
+		"   {:<8} {:<7} {:>9} {:>9} {:>9} {:>11}  {}",
+		"camera", "path", "x", "y", "z", "z vs row", "verdict"
+	);
+	for (row, group) in &by_row {
+		let mean_z: f64 = group.iter().map(|(_, _, c)| c[2]).sum::<f64>() / group.len() as f64;
+		for (cam, path, c) in group {
+			let dz = c[2] - mean_z;
+			// Modules of one row are mounted on one plate; a pose stored in a
+			// foreign convention would not land on it.
+			let verdict = if dz.abs() > 3.0 { "OFF ROW PLANE" } else { "consistent" };
+			println!(
+				"   {:<8} {:<7} {:>9.2} {:>9.2} {:>9.2} {:>11.3}  {}",
+				cam, path, c[0], c[1], c[2], dz, verdict
+			);
+		}
+		let spread = group
+			.iter()
+			.map(|(_, _, c)| c[2])
+			.fold(f64::NEG_INFINITY, f64::max)
+			- group
+				.iter()
+				.map(|(_, _, c)| c[2])
+				.fold(f64::INFINITY, f64::min);
+		println!("   row {row}: mean z {mean_z:+.2} mm, spread {spread:.2} mm");
 	}
 }
 

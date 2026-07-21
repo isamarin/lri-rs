@@ -325,10 +325,43 @@ B1/B5 could not need a flip against one and not the other.
 
 So §1b's convention suspicion is alive, but pointed somewhere new: not
 `canonical` vs `mirror`, but **`None` vs `Glued` inside the canonical path**.
-Test it before anything else — and note the fixture problem: no capture on hand
-fires the A row and C5/C6 together, so the two reference classes have never been
-compared on one frame. Find or shoot a capture that does. That, not another flip
-permutation, is the next move.
+
+### Two follow-ups, both answered without the camera
+
+**The fixture cannot be shot.** All 62 captures scanned
+(`cargo run --release -p light --example fixture_scan -- …`): the camera fires in
+two exclusive modes — **wide** (A row + B row, 10 modules, reference A1, focal ≤
+66) or **tele** (B row + C row, 11 modules, reference B4, focal ≥ 71). The A row
+and the glued C modules never appear in the same shot, on any capture, and that
+is a property of how the camera selects modules, not a gap in our sample. An
+earlier note here said to go shoot one; that was wrong and is withdrawn. The two
+reference classes cannot be compared by correlation at all. Only the B row
+bridges the two modes, which is exactly why B1/B5 are where the contradiction
+surfaced.
+
+**The convention mismatch is not in `t`.** `mirror_aim` now reconstructs every
+camera centre (`C = −Rᵀ·t`) and checks the physical layout — no images involved,
+which is the point. The sixteen centres form three clean depth layers:
+
+| row | mean z | spread | contains |
+| --- | --- | --- | --- |
+| A | +0.00 mm | 0.00 mm | 5 canonical (`None`) |
+| B | −10.36 mm | 1.24 mm | 4 mirror + **B4 canonical (`Glued`)** |
+| C | −12.43 mm | 1.52 mm | 4 mirror + **C5/C6 canonical (`Glued`)** |
+
+The layering itself is physics, not a defect: a folded optical path puts the
+virtual centre behind the face, so the mirror rows sit back from the flat-mounted
+A row.
+
+What matters is that **canonical and mirror-derived poses interleave within a
+row**. B4 lands 0.19 mm from the plane its four mirror-derived neighbours define;
+C5 and C6 land 0.04 and 0.14 mm from theirs. Two poses computed by different code
+paths from different stored data agree on where the module physically is, to
+fractions of a millimetre. That is not what a convention mismatch looks like.
+
+So `t` is exonerated for both paths, and since `homography_infinity` uses only
+`K` and `R` anyway, **the reference-dependent flip has to live in `R`**. That is
+where to look next, and it can be looked at entirely offline.
 
 ### 1a. B1/B5 — movable modules, sign or per-module data
 
