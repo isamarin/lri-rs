@@ -15,7 +15,7 @@ pub mod unpack;
 pub use distortion::{CraDistortion, ModuleDistortion, PolynomialDistortion};
 pub use error::LriError;
 pub use fusion::*;
-pub use mirror_pose::rotation_determinant;
+pub use mirror_pose::{hall_code_to_mirror_angle_deg, rotation_determinant};
 pub use types::*;
 
 pub struct LriFile<'lri> {

@@ -145,11 +145,13 @@ B2/B3/C2/C4 did not move by a single digit. Running the *inverse* (flip the
 | B2 `00078` | true | +0.442 | +0.442 | **−0.151** |
 | B3 `00078` | true | +0.345 | +0.345 | **−0.258** |
 
-**For the B row this is settled: the image needs flipping exactly when
-`flip_img_around_x` is false.** Consistent across all five captures, and the
-magnitudes on `00078` (|0.3|) put it far outside noise. Note what that means —
-the flag reads as a statement about how the sensor image *already arrives*, not
-as an instruction to flip it.
+> **Retracted the same day.** This section originally read "for the B row this is
+> settled: the image needs flipping exactly when `flip_img_around_x` is false."
+> That was wrong, and wrong in the project's signature way — it was concluded
+> from captures that do not disagree with each other. See §1c: the rule holds
+> against an A-row reference and fails against B4, with identical flags in both
+> files. Kept here because the measurements are sound; only the conclusion drawn
+> from them was not.
 
 #### Why this is not yet wired in
 
@@ -235,6 +237,98 @@ The camera itself declares three mirror classes in the `.lri` protobuf
 matching the patent family exactly (see [`PATENTS.md`](PATENTS.md) §2a: no
 mirror / fixed mirror / movably hinged). The code never branches on this field
 outside a test.
+
+## 1c. C pointing — investigated 2026-07-21, and it is not pointing
+
+Went looking for the C row's aim error. It is not there. Four suspects were
+eliminated by measurement, one new instrument came out of it, and the flip rule
+from §1 was refuted.
+
+New tool: `cargo run -p light --example mirror_aim -- <lri>` — mirror angle vs
+the range the calibration declares, optical axis vs the reference, K per module,
+and the parallax an infinity homography is throwing away.
+
+### Eliminated
+
+- **Hall→angle mapping.** All eight mirror modules land inside their own declared
+  `mirror_angle_range` on `00003`, with 0.9–3.4° of margin. Not a tuning matter:
+  an out-of-range angle would have meant the camera says the mirror cannot be
+  there. It never happens.
+- **Pointing itself.** Every module's optical axis (`Rᵀ·ẑ`) sits within 6° of the
+  reference — A row 0.7–1.0°, B row 0.3–1.7°, C row 0.6–5.7°. Nothing is aimed
+  away.
+- **~~"C modules aim at different parts of the scene" (from the patents)~~** —
+  **not supported by our data.** The poses put the C row on the same scene as
+  everything else. What looks like different framing on the contact sheet is a
+  150 mm crop of the same view, not a different view. The patents describe what
+  the design *can* do; this capture does not do it.
+- **Intrinsics and focus-plane selection.** C1–C4 and C5/C6 draw `fx ≈ 18 450`,
+  comparable principal points, and identical focus distances (int 1500 / ext
+  818). §1b's "extrinsics bundle ignores focal length" suspicion is real in the
+  code but is not what separates these modules.
+
+### The instrument that actually works: sweep the preview scale
+
+`light validate --max-side 1024 → 128`. Residual misalignment shrinks with
+resolution, so a merely *misaligned* module climbs toward its true correlation as
+the preview coarsens, while a module in a *mirrored frame* gets more negative —
+the anti-correlation is real signal and survives blurring.
+
+| module | 1024 | 512 | 256 | 128 | reading |
+| --- | --- | --- | --- | --- | --- |
+| B2 | +0.286 | +0.400 | +0.505 | +0.584 | aligned, parallax-limited |
+| B3 | +0.326 | +0.454 | +0.568 | +0.653 | aligned, parallax-limited |
+| C5 | +0.243 | +0.376 | +0.596 | **+0.679** | aligned, parallax-limited |
+| C6 | +0.146 | +0.228 | +0.342 | +0.412 | aligned, parallax-limited |
+| C1 | +0.068 | +0.098 | +0.127 | +0.148 | weakly aligned |
+| C3 | +0.012 | +0.014 | +0.025 | +0.027 | no correlation at any scale |
+| C4 | −0.007 | −0.012 | −0.010 | −0.021 | no correlation at any scale |
+| C2 | −0.082 | −0.131 | −0.176 | **−0.252** | **mirrored** — diverges, not converges |
+
+This retires the "C row is unmeasurable" worry from §1. **C5 reaches +0.68 —
+better than any B module.** A 150 mm module at ~20 % overlap scores perfectly
+well when its pose is right. The low full-resolution numbers are parallax:
+`homography_infinity` discards `t`, and ignored disparity scales with `fx`, so
+the C row pays roughly 2.5–3× what the B row pays for the same baseline. That
+caps everyone's absolute score and is Phase 3's problem, not a pose bug.
+
+So the C row splits three ways, and only one part is a mirror problem:
+**C2 is mirrored** (and takes the `flag_true` flip to +0.272 on `00003`, +0.115
+on `00045`); **C3 and C4 correlate with nothing at any scale**, which is a pose
+or content question, not a parity one; **C1 is fine**, merely weak.
+
+### What broke the §1 flip rule
+
+Running the flip experiment at 128 px, where the signal is 2–3× stronger:
+
+| capture | ref | B1 no flip | B1 flip | B5 no flip | B5 flip |
+| --- | --- | --- | --- | --- | --- |
+| `00078` | **A1** | −0.415 | **+0.548** | −0.409 | **+0.516** |
+| `00003` | **B4** | +0.163 | +0.154 | **+0.129** | −0.003 |
+| `00045` | **B4** | +0.186 | +0.195 | **+0.231** | +0.001 |
+
+The same module wants opposite treatment depending on **which camera the file
+names as reference**. `flip_img_around_x` is byte-identical for every module
+across these files, so this is not a firmware or per-unit difference.
+
+That kills "flip iff `flag == false`". It was inferred from `00078` — the only
+capture in the set with an A-row reference — and it is an artifact of the
+reference, not a property of B1/B5. The old failure mode exactly: a rule tuned on
+the subset that cannot contradict it.
+
+### The question this leaves, which is sharper than the one it replaces
+
+Why does the flip requirement depend on the reference camera at all? Two frames
+are involved: A1 is `MirrorType::None`, B4 is `Glued`, and both take the
+`canonical` path. If those two canonical poses were in the same convention,
+B1/B5 could not need a flip against one and not the other.
+
+So §1b's convention suspicion is alive, but pointed somewhere new: not
+`canonical` vs `mirror`, but **`None` vs `Glued` inside the canonical path**.
+Test it before anything else — and note the fixture problem: no capture on hand
+fires the A row and C5/C6 together, so the two reference classes have never been
+compared on one frame. Find or shoot a capture that does. That, not another flip
+permutation, is the next move.
 
 ### 1a. B1/B5 — movable modules, sign or per-module data
 
