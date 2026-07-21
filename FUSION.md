@@ -152,7 +152,7 @@ Open questions — fill in when confirmed:
 | [dllu/lri-rs](https://github.com/dllu/lri-rs) / [gennyble/lri-rs](https://github.com/gennyble/lri-rs) | Proto extraction basis |
 | [LRI.md](LRI.md) | Container format |
 | [bayer_jpeg.md](bayer_jpeg.md) | BJPG decode |
-| [openlight-camera](https://github.com/helloavo/openlight-camera) | Decompiled `light_camera.apk` (v1.3.5.1) — **writes** `.lri`, IPC to fusion service; local clone at `/Users/igor/StudioProjects/openlight-camera` |
+| [openlight-camera](https://github.com/helloavo/openlight-camera) | Decompiled `light_camera.apk` (v1.3.5.1) — **writes** `.lri`, IPC to fusion service; kept as a local clone |
 | Light L16 Discord (linked from archive README) | Owner reports, firmware |
 | Wayback [light.co/camera](https://web.archive.org/web/20191222062257/https://light.co/camera) | Marketing / spec claims |
 
