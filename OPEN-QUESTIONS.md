@@ -7,8 +7,12 @@ worklist, most important first.
 **Bench state:** real L16 on USB (fw 1.3.5.1), 61 real captures in
 `.data-from-camera/raw/` (gitignored). Native engine pulled to
 `vendor/light-l16/APKs/Firmware-1.3.5.1/libcp.so`. First open fused frame exists
-(healthy module triple). Work is on branch `openfusion-extract`, committed
-locally, **not pushed** (owner does not want this public yet).
+(healthy module triple). Work is on branch `openfusion-extract`.
+
+Published deliberately, in this state: the fusion half does not work yet and the
+documents say so on every page. That is the point of publishing them — the record
+of what was tried, what was measured, and what was retracted is the part worth
+handing to whoever picks this up, and it is worth more accurate than flattering.
 
 That firmware directory (46 MB: `libcp.so`, `libcp.dylib`, both APKs) is
 untracked **by decision, not by omission** — redistributing a vendor binary is a
