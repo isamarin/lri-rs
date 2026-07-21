@@ -61,8 +61,6 @@ Replaces the older `prism` and `lri-study` binaries (still in repo, no longer in
 - [FUSION.md](FUSION.md) — Lumen combine research log (geometry, depth, blend) — **living doc for humans and agents**
 - [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) — open worklist, most important first; start here to pick something up
 - [PATENTS.md](PATENTS.md) — what Light's patents do and do not disclose. **Read before attacking geometry:** they give *structure* (three mirror classes, hinge-axis constraints) and never mechanics, and knowing which is which saves days
-- [RE-LIGHT.md](RE-LIGHT.md) — the plan: phases, gates, and where this is meant to end up
-
 ## Library example
 
 ```rust

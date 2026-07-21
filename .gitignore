@@ -8,3 +8,6 @@
 /.data-from-camera/
 .env
 .idea/
+
+# Internal plan — outreach, timing, exposure notes. Local only.
+/RE-LIGHT.md
