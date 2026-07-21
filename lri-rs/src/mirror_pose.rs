@@ -202,6 +202,27 @@ fn mat3_to_flat(m: [[f64; 3]; 3]) -> [f64; 9] {
 	]
 }
 
+/// Determinant of a row-major 3×3 rotation matrix.
+///
+/// Parity check, not a sanity check. Orthogonality (`RᵀR = I`) holds for **both**
+/// proper rotations (`det = +1`) and improper ones (`det = −1`, i.e. a reflection
+/// is baked in) — so an orthogonality assertion alone cannot tell them apart.
+///
+/// `reflection_matrix` is a Householder reflection and has `det = −1` by
+/// construction; `flip_img_around_x` negates one row and multiplies the
+/// determinant by −1 again. So the flip flag is precisely the parity correction
+/// for an odd number of reflections in the optical chain — and `det` is the
+/// invariant that says whether it was applied when it should have been.
+///
+/// A module whose effective `R` comes out at `det = −1` sits in a mirrored
+/// coordinate frame: correlation against a correctly-handed reference goes
+/// *negative*, not merely to zero.
+pub fn rotation_determinant(r: &[f32; 9]) -> f64 {
+	let m = |i: usize| r[i] as f64;
+	m(0) * (m(4) * m(8) - m(5) * m(7)) - m(1) * (m(3) * m(8) - m(5) * m(6))
+		+ m(2) * (m(3) * m(7) - m(4) * m(6))
+}
+
 /// Mirror pose from `MirrorSystem` + mirror angle (degrees).
 ///
 /// Model: rotate `mirror_normal_at_zero` about `rotation_axis`, build reflection,
@@ -278,8 +299,24 @@ mod tests {
 		assert!((angle - 35.506893).abs() < 0.02);
 	}
 
+	/// Guards that a mirror-derived pose is a *rotation*, not a reflection.
+	///
+	/// **This test is expected to FAIL — it is red on purpose.** It documents an
+	/// open, reproduced defect, not a regression you introduced. Do not "fix" it
+	/// by relaxing the assertion.
+	///
+	/// The fixture is a `flip_img_around_x = false` module, and for those the
+	/// composition in `compute_mirror_rt_raw` leaves `det(R) = −1` — an improper
+	/// rotation. Affects B1, B5, C1, C3 on every capture and every focal length.
+	/// Root cause, measurements and the fix direction: `OPEN-QUESTIONS.md` §1.
+	///
+	/// It went unnoticed because the assertion below used to check only
+	/// `RᵀR = I`, which holds for `det = ±1` alike, and because the flip was
+	/// tuned on B2/B3 — the two modules where the flag happens to be `true`.
+	///
+	/// Turns green when parity is restored for all modules.
 	#[test]
-	fn mirror_extrinsics_produces_orthogonal_rotation() {
+	fn mirror_extrinsics_produce_proper_rotation() {
 		let ms = MirrorSystemData {
 			real_camera_location: [18.54517, 7.6582804, -3.4655511],
 			real_camera_orientation: [
@@ -310,6 +347,19 @@ mod tests {
 				);
 			}
 		}
+		// Orthogonality alone passes for det = −1 too. Pin the parity: a proper
+		// rotation must be +1, otherwise a reflection survived uncorrected.
+		let det = rotation_determinant(&r);
+		assert!(
+			(det - 1.0).abs() < 0.05,
+			"KNOWN BUG, see OPEN-QUESTIONS.md §1 — this failure is expected, not \
+			 a regression.\n\
+			 improper rotation: det={det:+.6} (a rotation must be +1; −1 means an \
+			 odd number of reflections was left uncorrected).\n\
+			 reflection_matrix() is Householder (det = −1 by construction), so \
+			 R stays improper unless flip_img_around_x restores parity — and it \
+			 is false for B1, B5, C1, C3."
+		);
 		assert!(ext.translation[0].abs() < 80.0);
 	}
 
