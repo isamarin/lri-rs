@@ -11,8 +11,21 @@ const DEG2RAD: f64 = std::f64::consts::PI / 180.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct MirrorExtrinsics {
+	/// Proper rotation, `det = +1`, for every module — see [`rotation_determinant`].
 	pub rotation: [f32; 9],
 	pub translation: [f32; 3],
+	/// `MirrorSystem.flip_img_around_x`, carried through unconsumed.
+	///
+	/// The flag used to double as the parity correction on `rotation`; that job
+	/// now belongs to the composition itself and does not depend on the flag.
+	/// What is left is the flag's actual meaning — flip the *image* around its
+	/// horizontal axis — which is a warp-time operation nothing applies yet.
+	///
+	/// It is surfaced rather than dropped because the modules where it is true
+	/// (B2, B3, C2, C4) currently reconstruct correctly *without* any image
+	/// flip, so applying it naively would break the modules that work. Whether
+	/// it should be consumed at all is open.
+	pub image_flip_x: bool,
 }
 
 /// Per-shot mirror hall code from `CameraModule.mirror_position` (0–1023).
@@ -50,6 +63,7 @@ pub fn compute_mirror_extrinsics(
 			t_out[1] as f32,
 			t_out[2] as f32,
 		],
+		image_flip_x: mirror_system.flip_img_around_x,
 	})
 }
 
@@ -255,10 +269,16 @@ fn compute_mirror_rt_raw(
 			p.real_camera_location[0], p.real_camera_location[1], p.real_camera_location[2],
 		);
 	}
-	let mut r = mat3_mul(reflection_matrix(n), p.r_cam);
-	if p.flip_img_around_x {
-		r = flip_x_mat(r);
-	}
+	// `reflection_matrix` is Householder: det = −1 by construction, and `r_cam` is
+	// proper, so the product is improper for *every* module. `flip_x_mat` negates
+	// a row and takes it back to +1. That correction is unconditional — a camera
+	// extrinsic rotation lives in SO(3), and nothing about a per-module mounting
+	// flag can make an improper matrix an acceptable pose.
+	//
+	// It used to be applied only when `flip_img_around_x` was true, which left
+	// B1, B5, C1, C3 reflected on every capture. It went unnoticed because the
+	// two modules it was tuned on both have the flag set. See OPEN-QUESTIONS §1.
+	let r = flip_x_mat(mat3_mul(reflection_matrix(n), p.r_cam));
 	*r_out = mat3_to_flat(r);
 	*t_out = reflect_point(p.real_camera_location, n, p_plane);
 	Some(())
@@ -301,20 +321,13 @@ mod tests {
 
 	/// Guards that a mirror-derived pose is a *rotation*, not a reflection.
 	///
-	/// **This test is expected to FAIL — it is red on purpose.** It documents an
-	/// open, reproduced defect, not a regression you introduced. Do not "fix" it
-	/// by relaxing the assertion.
+	/// The fixture is a `flip_img_around_x = false` module — the case that used
+	/// to come out at `det = −1`, leaving B1, B5, C1, C3 in a mirrored frame on
+	/// every capture and every focal length (`OPEN-QUESTIONS.md` §1).
 	///
-	/// The fixture is a `flip_img_around_x = false` module, and for those the
-	/// composition in `compute_mirror_rt_raw` leaves `det(R) = −1` — an improper
-	/// rotation. Affects B1, B5, C1, C3 on every capture and every focal length.
-	/// Root cause, measurements and the fix direction: `OPEN-QUESTIONS.md` §1.
-	///
-	/// It went unnoticed because the assertion below used to check only
-	/// `RᵀR = I`, which holds for `det = ±1` alike, and because the flip was
-	/// tuned on B2/B3 — the two modules where the flag happens to be `true`.
-	///
-	/// Turns green when parity is restored for all modules.
+	/// Note why the earlier version of this test could not catch it: it asserted
+	/// only `RᵀR = I`, which holds for `det = ±1` alike. Orthogonality never
+	/// distinguishes a rotation from a reflection. Keep the parity assertion.
 	#[test]
 	fn mirror_extrinsics_produce_proper_rotation() {
 		let ms = MirrorSystemData {
@@ -352,15 +365,48 @@ mod tests {
 		let det = rotation_determinant(&r);
 		assert!(
 			(det - 1.0).abs() < 0.05,
-			"KNOWN BUG, see OPEN-QUESTIONS.md §1 — this failure is expected, not \
-			 a regression.\n\
-			 improper rotation: det={det:+.6} (a rotation must be +1; −1 means an \
-			 odd number of reflections was left uncorrected).\n\
-			 reflection_matrix() is Householder (det = −1 by construction), so \
-			 R stays improper unless flip_img_around_x restores parity — and it \
-			 is false for B1, B5, C1, C3."
+			"improper rotation: det={det:+.6}, must be +1. An odd number of \
+			 reflections was left uncorrected — the parity fix in \
+			 compute_mirror_rt_raw has been made conditional again. \
+			 See OPEN-QUESTIONS.md §1."
 		);
 		assert!(ext.translation[0].abs() < 80.0);
+		// The flag is carried, not consumed: it must not silently move back into R.
+		assert!(!ext.image_flip_x);
+	}
+
+	/// Parity must not depend on the flag — that dependency *was* the bug.
+	///
+	/// Same fixture, `flip_img_around_x` flipped to true. Both settings have to
+	/// yield a proper rotation, and the flag has to survive to the caller so the
+	/// image-flip question stays answerable at warp time.
+	#[test]
+	fn parity_holds_for_both_settings_of_the_flip_flag() {
+		let base = MirrorSystemData {
+			real_camera_location: [18.54517, 7.6582804, -3.4655511],
+			real_camera_orientation: [
+				-0.38093942, 0.47482356, 0.7933648, -0.49646932, 0.61882627, -0.60874647,
+				-0.7800022, -0.6257768, 1.5680847e-8,
+			],
+			rotation_axis: [0.60439825, 0.7966334, -0.008826814],
+			point_on_rotation_axis: [22.03876, 5.055312, 0.8291366],
+			distance_mirror_plane_to_point_on_rotation_axis: 3.9343035,
+			mirror_normal_at_zero_degrees: [0.79949564, -0.6006531, -0.0047436645],
+			flip_img_around_x: false,
+			mirror_angle_range: crate::fusion::Range2F { min: 35.5, max: 44.75 },
+			reprojection_error: Some(0.35),
+		};
+
+		for flip in [false, true] {
+			let ms = MirrorSystemData { flip_img_around_x: flip, ..base.clone() };
+			let ext = compute_mirror_extrinsics(&ms, 44.755).expect("extrinsics");
+			let det = rotation_determinant(&ext.rotation);
+			assert!(
+				(det - 1.0).abs() < 0.05,
+				"flip={flip}: det={det:+.6}, expected +1"
+			);
+			assert_eq!(ext.image_flip_x, flip, "flag must reach the caller intact");
+		}
 	}
 
 	#[test]

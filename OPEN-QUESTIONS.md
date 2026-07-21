@@ -69,19 +69,69 @@ B2 and B3 — the only two modules the flip was tuned on (`cff7a7d`, from
 `L16_00078`, no camera) — both have `flip = true`. They come out proper and look
 correct. **The bug is structurally invisible on exactly the tuning subset.**
 
-### What to fix
+### Half fixed, 2026-07-21 — and the other half is now visible
 
-`flip_img_around_x` is doing two jobs at once and they must be separated:
+`flip_img_around_x` was doing two jobs: the image flip it names, and the parity
+of `R` it supplied by accident. The parity job is now unconditional —
+`compute_mirror_rt_raw` applies `flip_x_mat` for every module, so `R` is proper
+by construction and does not depend on the flag. The flag survives as
+`MirrorExtrinsics.image_flip_x`, **carried but not consumed**: nothing applies an
+image flip at warp time yet.
 
-1. what the flag *means* — flip the image around its horizontal axis;
-2. what it is *accidentally providing* — the parity of `R`.
+`det = +1` on all 16 modules across `00001`, `00003`, `00020`, `00045`, `00078`.
+The `mirror_extrinsics_produce_proper_rotation` test is green, and a second test
+pins parity for *both* settings of the flag so it cannot creep back into `R`.
 
-`R` must be proper by construction for all modules; the image flip belongs at
-warp time, driven by the flag. The RE target `0x1c7580` now has a precise
-question instead of a vague one: **what restores parity in the real engine when
-`flip_img_around_x` is false?** Look for a second parity-changing step (a
-further reflection, an axis negation, or extraction of the rotation part) that
-the port dropped.
+**The change is provably isolated.** Per-module NCC moved on exactly B1, B5, C1,
+C3 — the four `flip = false` modules — and on nothing else, to the last digit.
+The twelve working modules are untouched.
+
+#### What the numbers say (`light validate`, per-module NCC vs reference)
+
+| module | 00001 28/A1 | 00003 77/B4 | 00020 28/A1 | 00045 71/B4 | 00078 87/A1 |
+| --- | --- | --- | --- | --- | --- |
+| B1 | +0.101 → +0.112 | +0.054 → +0.068 | −0.040 → −0.059 | +0.076 → +0.076 | **+0.348 → −0.262** |
+| B5 | −0.028 → +0.028 | +0.003 → +0.059 | +0.041 → −0.028 | −0.001 → +0.094 | **+0.344 → −0.258** |
+| C1 | — | −0.061 → **+0.068** | — | −0.022 → **+0.023** | — |
+| C3 | — | −0.059 → **+0.012** | — | +0.014 → +0.002 | — |
+
+C1 is the clean confirmation: negative → positive on both captures where it
+fires, which is the parity signature and nothing else.
+
+#### The counterexample, stated rather than buried
+
+On `00078` B1 and B5 went from **+0.35 to −0.26**. That capture is not
+dismissible: all five B modules there share the same 16.5 % overlap with the A1
+reference, and B2/B3/B4 score +0.44/+0.34/+0.57 under identical conditions. It
+is the best-conditioned measurement we have, and it is the one that got worse.
+
+Read it as the diagnosis it is: **B1/B5 are still in a mirrored frame after `R`
+was made proper.** A strong negative NCC is the mirrored-frame signature, not
+noise. Before the fix, the improper `R` was smuggling the image flip through the
+homography — the algebra was wrong but the warp came out right, on this capture.
+Making `R` proper removed a flip the warp still needs, and the elsewhere-mushy
+numbers (|NCC| < 0.1 on the 28 mm captures) were too weak to show it.
+
+So the fix is correct and incomplete. `det = +1` is an invariant, not a
+preference — an improper pose is never an acceptable state, and a number that
+looked better while the model was wrong was a number worth losing.
+
+#### Next, and the fork to be careful about
+
+The remaining difference between {B2, B3, C2, C4} and {B1, B5, C1, C3} is now
+*only the flag itself*, since it no longer enters `R`. The obvious hypothesis is
+that `flip_img_around_x` describes how the sensor image already arrives, so the
+modules where it is **false** are the ones needing the flip applied downstream.
+
+That has a falsifiable prediction, which is why it is worth one run rather than a
+search: applying an image flip at warp time to the four `flip = false` modules
+should send B1/B5 on `00078` back to ≈ +0.3 **without moving B2/B3/C2/C4 at
+all**. If it does not, stop and go to `0x1c7580` with the sharper question:
+*what does the engine do differently for a `flip = false` module, given parity is
+already handled?*
+
+Do not tune this by trying axis/sign combinations until a number improves — that
+is what produced the original defect (see superseded hypotheses below).
 
 ### Guard now in place
 
@@ -92,11 +142,18 @@ alone can never detect an improper rotation.
 
 ### Still open after the fix
 
-C2 and C4 are **proper yet still correlate negatively**. Parity does not explain
-them — they need the §1a angle/axis work, or their pointing is simply wrong (C is
-150 mm tele; per the patents these modules aim at *different* parts of the scene,
-so a wrong mirror angle sends them somewhere else entirely and NCC against B4
-means little until pointing is right).
+C2 and C4 are **proper yet still correlate negatively** (−0.082 / −0.007 on
+`00003`, −0.055 / −0.011 on `00045`), and the parity fix did not touch them —
+they already had `flip = true`. Parity does not explain them: they need the §1a
+angle/axis work, or their pointing is simply wrong (C is 150 mm tele; per the
+patents these modules aim at *different* parts of the scene, so a wrong mirror
+angle sends them somewhere else entirely and NCC against B4 means little until
+pointing is right).
+
+Supporting evidence for the pointing reading, cheap to reproduce:
+`light grid .data-from-camera/raw/L16_00003.lri <out>` renders all sixteen
+modules as a contact sheet, and the C2/C4 cells visibly frame a different part
+of the scene than the B row. Worth looking at before spending more on NCC.
 
 ### Superseded hypotheses
 
