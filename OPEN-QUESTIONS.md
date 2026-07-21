@@ -496,6 +496,49 @@ git submodule add https://github.com/isamarin/openfusion openfusion
 git commit -m "extract openfusion fusion-geometry crate as submodule"
 ```
 
+### Do the deduplication first — surveyed 2026-07-21
+
+`openfusion` is 213 lines and its geometry is **already duplicated inside
+`light`**, which is the wrong state to freeze behind a submodule boundary. A
+split now would publish an API whose correctness is still open (§1c) and leave
+three copies of the same maths on either side of it.
+
+Duplicated today, all of it collapsible without creating a single new repo:
+
+| in `light` | already in `openfusion` |
+| --- | --- |
+| `validate_rt::homography_infinity` | `warp::homography_infinity` — same formula |
+| `validate_rt::mat3` | `warp::mat3_f32` |
+| `validate_rt::scaled_k` | `CameraPose::scaled` |
+| `validate_rt::compare_overlap` (NCC part) | `stereo::ncc_overlap` |
+| `validate_rt::sample_bilinear` | — but **verbatim identical** to `fuse::sample_bilinear` |
+
+Separately, `lri-rs/src/mirror_pose.rs` hand-rolls ~120 lines of 3×3 maths —
+`mat3_mul`, `rodrigues`, `normalize3`, `mat3_vec`, `reflection_matrix`,
+`reflect_point`, and two layout converters — while **nalgebra is already a direct
+dependency of `lri-rs`**. That code is not wrong, but it is where the parity bug
+lived, and `det`/transpose/inverse from a library that has been read by thousands
+of people is a better place for geometry to live than eight private helpers.
+
+Camera-centre reconstruction (`C = −Rᵀ·t`) is now written out three times across
+`light/examples/mirror_aim.rs` alone. It belongs next to `CameraPose`.
+
+**Order:** collapse the duplicates onto `openfusion`, move `mirror_pose` onto
+nalgebra, give `CameraPose` the centre/axis/determinant accessors — then consider
+splitting, and split something that has one implementation.
+
+### The genuinely reusable piece is not the fusion code
+
+If anything here deserves to be a crate other people depend on, it is
+`light/src/tiff_out.rs` (86 lines, **zero** references to anything L16) plus
+`light/src/dng.rs` (240 lines, one). A minimal dependency-light writer for 16-bit
+TIFF and DNG is useful to anyone doing sensor work in Rust, and the ecosystem is
+thin there. The fusion geometry, by contrast, is only interesting to people who
+have this camera.
+
+That is worth remembering when choosing what to publish first: the fusion work is
+the part *we* care about, and the file writers are the part a stranger can use.
+
 ## 6. Dataset hygiene — cleared 2026-07-21
 
 61 captures in `.data-from-camera/raw/` (gitignored). The worry was a live GPS
