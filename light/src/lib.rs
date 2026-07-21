@@ -6,6 +6,7 @@ pub mod fuse_export;
 pub mod tiff_out;
 pub mod fusion_sidecar;
 pub mod gather;
+pub mod grid;
 pub mod render;
 pub mod session;
 pub mod threads;

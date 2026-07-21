@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use light::{extract, fuse, gather, validate_rt};
+use light::{extract, fuse, gather, grid, validate_rt};
 
 #[derive(Parser)]
 #[command(
@@ -65,6 +65,16 @@ enum Command {
 		#[arg(long, default_value_t = 25)]
 		depth_steps: usize,
 	},
+	/// Contact sheet: per-module previews plus a labelled 16-cell grid
+	///
+	/// Every module gets a cell whether or not it fired, so a defect that hits a
+	/// subset (see OPEN-QUESTIONS.md §1) is visible instead of averaged away.
+	Grid {
+		/// Input .lri file
+		input: camino::Utf8PathBuf,
+		/// Output directory (grid.png plus one png per module)
+		output: camino::Utf8PathBuf,
+	},
 	/// Extract per-camera DNGs from one LRI file
 	Extract {
 		/// Input .lri file
@@ -112,6 +122,7 @@ fn main() -> Result<()> {
 			depth_steps,
 		)
 		.map(|_| ()),
+		Command::Grid { input, output } => grid::run(&input, &output),
 		Command::Extract { input, output, jobs } => extract::run(&input, &output, jobs),
 	}
 }
