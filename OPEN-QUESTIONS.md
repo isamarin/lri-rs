@@ -531,6 +531,19 @@ Camera-centre reconstruction (`C = −Rᵀ·t`) is now written out three times a
 nalgebra, give `CameraPose` the centre/axis/determinant accessors — then consider
 splitting, and split something that has one implementation.
 
+**Done 2026-07-21 — the duplicates are collapsed.** New `openfusion::raster`
+holds `warp_inverse`, `sample_bilinear` and `compare_overlap` on `&[u8]` (no
+image-library dependency in the geometry core), and `CameraPose` gained
+`centre` / `optical_axis` / `rotation_determinant`. `light` lost ~240 lines:
+`validate_rt` and `fuse` now call the shared code through thin `GrayImage`
+adapters, and the primitive-level tests moved to `openfusion` with them.
+
+Verified no behaviour change: `overlap_pixels` is identical to the last digit on
+`L16_00003`, and NCC differs by ≤ 4.7e-6 — the old `light` path sampled in `f32`,
+the shared primitive uses `f64`, so this is the refactor being slightly *more*
+accurate, not a regression. Still open under this heading: `mirror_pose` onto
+nalgebra (the ~120 hand-rolled lines), and only then a submodule split.
+
 ### The genuinely reusable piece is not the fusion code
 
 If anything here deserves to be a crate other people depend on, it is

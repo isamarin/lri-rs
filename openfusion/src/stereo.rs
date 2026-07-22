@@ -28,38 +28,12 @@ pub fn warp_homography(src: &CameraPose, dst: &CameraPose, depth_mm: f64) -> nal
 }
 
 /// Zero-mean normalized cross-correlation on overlapping non-zero pixels.
+///
+/// Thin wrapper kept for callers that want the single number. Use
+/// [`crate::raster::compare_overlap`] when the overlap size matters — and it
+/// usually does, since a sliver of overlap correlates strongly on noise alone.
 pub fn ncc_overlap(a: &[u8], b: &[u8]) -> f64 {
-	assert_eq!(a.len(), b.len());
-	let mut n = 0u32;
-	let mut sum_a = 0f64;
-	let mut sum_b = 0f64;
-	let mut sum_aa = 0f64;
-	let mut sum_bb = 0f64;
-	let mut sum_ab = 0f64;
-	for (pa, pb) in a.iter().zip(b.iter()) {
-		if *pa == 0 || *pb == 0 {
-			continue;
-		}
-		let av = *pa as f64;
-		let bv = *pb as f64;
-		n += 1;
-		sum_a += av;
-		sum_b += bv;
-		sum_aa += av * av;
-		sum_bb += bv * bv;
-		sum_ab += av * bv;
-	}
-	if n == 0 {
-		return f64::NAN;
-	}
-	let nf = n as f64;
-	let cov = sum_ab - sum_a * sum_b / nf;
-	let var_a = sum_aa - sum_a * sum_a / nf;
-	let var_b = sum_bb - sum_b * sum_b / nf;
-	if var_a < 1e-6 || var_b < 1e-6 {
-		return f64::NAN;
-	}
-	cov / (var_a.sqrt() * var_b.sqrt())
+	crate::raster::compare_overlap(a, b).ncc
 }
 
 #[cfg(test)]

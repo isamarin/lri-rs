@@ -18,6 +18,28 @@ impl CameraPose {
 		}
 	}
 
+	/// Optical centre in world coordinates: `C = −Rᵀ·t`.
+	///
+	/// Where the module physically sits. Unlike anything derived from image
+	/// content, this is checkable against the hardware: the modules of a rig are
+	/// mounted in a known arrangement, so centres that do not form it indicate a
+	/// pose stored in a convention the reader is not applying.
+	pub fn centre(&self) -> Vector3<f64> {
+		-(self.r.transpose() * self.t)
+	}
+
+	/// Viewing direction in world coordinates: `Rᵀ·ẑ`, the third row of `R`.
+	pub fn optical_axis(&self) -> Vector3<f64> {
+		Vector3::new(self.r[(2, 0)], self.r[(2, 1)], self.r[(2, 2)])
+	}
+
+	/// Determinant of `R`. A pose is a rotation only at `+1`; `−1` means a
+	/// reflection is baked in and the module sits in a mirrored frame.
+	/// Orthogonality (`RᵀR = I`) holds for both and cannot tell them apart.
+	pub fn rotation_determinant(&self) -> f64 {
+		self.r.determinant()
+	}
+
 	pub fn scaled(&self, step: usize) -> Self {
 		let s = 1.0 / step as f64;
 		let mut k = self.k;
@@ -75,6 +97,32 @@ pub fn map_ref_to_src(h: &Matrix3<f64>, x: f64, y: f64) -> Option<(f64, f64)> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn scaled_brings_intrinsics_down_with_the_preview() {
+		let pose = CameraPose::from_row_major(
+			[200.0, 0.0, 100.0, 0.0, 200.0, 80.0, 0.0, 0.0, 1.0],
+			[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+			[0.0; 3],
+		)
+		.scaled(4);
+		assert!((pose.k[(0, 0)] - 50.0).abs() < 1e-9);
+		assert!((pose.k[(0, 2)] - 25.0).abs() < 1e-9);
+		assert!((pose.k[(1, 1)] - 50.0).abs() < 1e-9);
+		assert!((pose.k[(1, 2)] - 20.0).abs() < 1e-9);
+	}
+
+	#[test]
+	fn centre_and_determinant_of_a_plain_pose() {
+		let pose = CameraPose::from_row_major(
+			[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+			[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+			[3.0, -4.0, 5.0],
+		);
+		// R = I ⇒ C = −t.
+		assert_eq!(pose.centre(), Vector3::new(-3.0, 4.0, -5.0));
+		assert!((pose.rotation_determinant() - 1.0).abs() < 1e-12);
+	}
 
 	fn identity_pose(f: f64) -> CameraPose {
 		CameraPose {

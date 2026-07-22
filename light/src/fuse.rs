@@ -424,36 +424,9 @@ fn bytes_to_gray(bytes: &[u8], w: u32, h: u32) -> GrayImage {
 }
 
 fn warp_gray(src: &GrayImage, h: &Matrix3<f64>, out_w: u32, out_h: u32) -> GrayImage {
-	let h_inv = h.try_inverse().expect("singular H");
 	let (sw, sh) = src.dimensions();
-	let sw = sw as i32;
-	let sh = sh as i32;
-	ImageBuffer::from_fn(out_w, out_h, |x, y| {
-		let p = h_inv * nalgebra::Vector3::new(x as f64, y as f64, 1.0);
-		if p.z.abs() < 1e-9 {
-			return Luma([0]);
-		}
-		let sx = (p.x / p.z) as f32;
-		let sy = (p.y / p.z) as f32;
-		Luma([sample_bilinear(src, sx, sy, sw, sh)])
-	})
-}
-
-fn sample_bilinear(img: &GrayImage, x: f32, y: f32, w: i32, h: i32) -> u8 {
-	if x < 0.0 || y < 0.0 || x >= (w - 1) as f32 || y >= (h - 1) as f32 {
-		return 0;
-	}
-	let x0 = x.floor() as i32;
-	let y0 = y.floor() as i32;
-	let fx = x - x0 as f32;
-	let fy = y - y0 as f32;
-	let p00 = img.get_pixel(x0 as u32, y0 as u32)[0] as f32;
-	let p10 = img.get_pixel((x0 + 1) as u32, y0 as u32)[0] as f32;
-	let p01 = img.get_pixel(x0 as u32, (y0 + 1) as u32)[0] as f32;
-	let p11 = img.get_pixel((x0 + 1) as u32, (y0 + 1) as u32)[0] as f32;
-	let top = p00 * (1.0 - fx) + p10 * fx;
-	let bot = p01 * (1.0 - fx) + p11 * fx;
-	(top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
+	let out = openfusion::raster::warp_inverse(src.as_raw(), (sw, sh), h, (out_w, out_h));
+	ImageBuffer::from_raw(out_w, out_h, out).expect("warp buffer")
 }
 
 fn accumulate(acc: &mut [f64], w: &mut [u32], img: &GrayImage, weight: f64) {

@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use camino::Utf8Path;
 use image::{imageops::FilterType, GrayImage, ImageBuffer, Luma, Rgb, RgbImage};
 use lri_rs::{CameraId, LriFile, SelectedFocusBundle};
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::Matrix3;
+use openfusion::{
+	raster::{self, Overlap},
+	CameraPose,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::session::LriSession;
@@ -96,9 +100,12 @@ fn run_decoded(
 		thumbnail::render_preview_gray(lri, ref_cam, max_side)?;
 	let ref_img = bytes_to_gray(&ref_bytes, ref_w, ref_h);
 
-	let ref_k = scaled_k(ref_pick.k_matrix.unwrap(), ref_step);
-	let ref_r = mat3(ref_pick.rotation.unwrap_or(identity9()));
-	let ref_t = vec3(ref_pick.translation.unwrap_or([0.0; 3]));
+	let ref_pose = pose(
+		ref_pick.k_matrix.unwrap(),
+		ref_pick.rotation,
+		ref_pick.translation,
+		ref_step,
+	);
 
 	let mut blend_acc = vec![0f64; (ref_w * ref_h) as usize];
 	let mut blend_w = vec![0u32; (ref_w * ref_h) as usize];
@@ -141,14 +148,12 @@ fn run_decoded(
 			thumbnail::render_preview_gray(lri, *camera, max_side)?;
 		let src_img = bytes_to_gray(&src_bytes, src_w, src_h);
 
-		let k_src = scaled_k(k_src, src_step);
-		let r_src = mat3(sel.rotation.unwrap_or(identity9()));
-		let t_src = vec3(sel.translation.unwrap_or([0.0; 3]));
+		let src_pose = pose(k_src, sel.rotation, sel.translation, src_step);
 
 		let flip = flip_experiment
 			.applies_to(sel)
 			.then(|| flip_y_in_source(src_img.height()));
-		let mut h = homography_infinity(&ref_k, &ref_r, &ref_t, &k_src, &r_src, &t_src);
+		let mut h = openfusion::warp::homography_infinity(&src_pose, &ref_pose);
 		if let Some(f) = flip {
 			h *= f;
 		}
@@ -159,8 +164,8 @@ fn run_decoded(
 			sweep_depth(
 				&src_img,
 				&ref_img,
-				(&ref_k, &ref_r, &ref_t),
-				(&k_src, &r_src, &t_src),
+				&ref_pose,
+				&src_pose,
 				flip.as_ref(),
 				depth_steps,
 				(ref_w, ref_h),
@@ -254,33 +259,8 @@ fn identity9() -> [f32; 9] {
 	[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 }
 
-fn mat3(row_major: [f32; 9]) -> Matrix3<f64> {
-	Matrix3::new(
-		row_major[0] as f64,
-		row_major[1] as f64,
-		row_major[2] as f64,
-		row_major[3] as f64,
-		row_major[4] as f64,
-		row_major[5] as f64,
-		row_major[6] as f64,
-		row_major[7] as f64,
-		row_major[8] as f64,
-	)
-}
 
-fn vec3(v: [f32; 3]) -> Vector3<f64> {
-	Vector3::new(v[0] as f64, v[1] as f64, v[2] as f64)
-}
 
-fn scaled_k(k: [f32; 9], step: usize) -> Matrix3<f64> {
-	let s = 1.0 / step as f64;
-	let mut m = mat3(k);
-	m[(0, 0)] *= s;
-	m[(0, 2)] *= s;
-	m[(1, 1)] *= s;
-	m[(1, 2)] *= s;
-	m
-}
 
 /// Planar homography at infinity: x_ref ~ K_ref (R_ref R_src^T) K_src^-1 x_src.
 /// Best NCC over a plane sweep, and the depth that achieved it.
@@ -295,20 +275,13 @@ fn scaled_k(k: [f32; 9], step: usize) -> Matrix3<f64> {
 fn sweep_depth(
 	src_img: &GrayImage,
 	ref_img: &GrayImage,
-	reference: (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>),
-	source: (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>),
+	dst: &CameraPose,
+	src: &CameraPose,
 	flip: Option<&Matrix3<f64>>,
 	steps: usize,
 	canvas: (u32, u32),
 ) -> (f64, f64) {
-	use openfusion::warp::{homography_at_depth, CameraPose};
-
-	let pose = |(k, r, t): (&Matrix3<f64>, &Matrix3<f64>, &Vector3<f64>)| CameraPose {
-		k: *k,
-		r: *r,
-		t: *t,
-	};
-	let (dst, src) = (pose(reference), pose(source));
+	use openfusion::warp::homography_at_depth;
 
 	// 0.5 m to 200 m. Below half a metre nothing in these captures lives; above
 	// 200 m the homography is indistinguishable from the infinity one.
@@ -321,7 +294,7 @@ fn sweep_depth(
 		let inv = (1.0 / NEAR_MM) + f * ((1.0 / FAR_MM) - (1.0 / NEAR_MM));
 		let depth = 1.0 / inv;
 
-		let mut h = homography_at_depth(&src, &dst, depth);
+		let mut h = homography_at_depth(src, dst, depth);
 		if let Some(f) = flip {
 			h *= f;
 		}
@@ -387,56 +360,43 @@ fn flip_y_in_source(src_h: u32) -> Matrix3<f64> {
 	)
 }
 
-fn homography_infinity(
-	k_ref: &Matrix3<f64>,
-	r_ref: &Matrix3<f64>,
-	_t_ref: &Vector3<f64>,
-	k_src: &Matrix3<f64>,
-	r_src: &Matrix3<f64>,
-	_t_src: &Vector3<f64>,
-) -> Matrix3<f64> {
-	let _ = (_t_ref, _t_src);
-	let r_rel = r_ref * r_src.transpose();
-	let k_src_inv = k_src.try_inverse().expect("singular K");
-	k_ref * r_rel * k_src_inv
-}
 
 fn bytes_to_gray(bytes: &[u8], w: u32, h: u32) -> GrayImage {
 	ImageBuffer::from_raw(w, h, bytes.to_vec()).expect("gray buffer")
 }
 
+/// `GrayImage` adapters over the `openfusion` primitives.
+///
+/// The geometry core works on `&[u8]` so it does not drag an image library into
+/// every consumer; this crate already uses `image`, so the seam lives here — one
+/// place, rather than a second copy of the maths.
 fn warp_inverse(src: &GrayImage, h: &Matrix3<f64>, out_w: u32, out_h: u32) -> GrayImage {
-	let h_inv = h.try_inverse().expect("singular homography");
 	let (sw, sh) = src.dimensions();
-	let sw = sw as i32;
-	let sh = sh as i32;
-
-	ImageBuffer::from_fn(out_w, out_h, |x, y| {
-		let p = h_inv * Vector3::new(x as f64, y as f64, 1.0);
-		if p.z.abs() < 1e-9 {
-			return Luma([0]);
-		}
-		let sx = (p.x / p.z) as f32;
-		let sy = (p.y / p.z) as f32;
-		Luma([sample_bilinear(src, sx, sy, sw, sh)])
-	})
+	let out = raster::warp_inverse(src.as_raw(), (sw, sh), h, (out_w, out_h));
+	ImageBuffer::from_raw(out_w, out_h, out).expect("warp buffer")
 }
 
-fn sample_bilinear(img: &GrayImage, x: f32, y: f32, w: i32, h: i32) -> u8 {
-	if x < 0.0 || y < 0.0 || x >= (w - 1) as f32 || y >= (h - 1) as f32 {
-		return 0;
-	}
-	let x0 = x.floor() as i32;
-	let y0 = y.floor() as i32;
-	let fx = x - x0 as f32;
-	let fy = y - y0 as f32;
-	let p00 = img.get_pixel(x0 as u32, y0 as u32)[0] as f32;
-	let p10 = img.get_pixel((x0 + 1) as u32, y0 as u32)[0] as f32;
-	let p01 = img.get_pixel(x0 as u32, (y0 + 1) as u32)[0] as f32;
-	let p11 = img.get_pixel((x0 + 1) as u32, (y0 + 1) as u32)[0] as f32;
-	let top = p00 * (1.0 - fx) + p10 * fx;
-	let bot = p01 * (1.0 - fx) + p11 * fx;
-	(top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
+fn compare_overlap(a: &GrayImage, b: &GrayImage) -> (f64, f64, u32) {
+	assert_eq!(a.dimensions(), b.dimensions());
+	let Overlap { pixels, mae, ncc } = raster::compare_overlap(a.as_raw(), b.as_raw());
+	(mae, ncc, pixels)
+}
+
+/// Pose at preview scale. `step` is the subsample factor the preview was
+/// rendered at, so the intrinsics have to come down with it.
+fn pose(k: [f32; 9], r: Option<[f32; 9]>, t: Option<[f32; 3]>, step: usize) -> CameraPose {
+	CameraPose::from_row_major(k, r.unwrap_or(identity9()), t.unwrap_or([0.0; 3])).scaled(step)
+}
+
+fn abs_diff(a: &GrayImage, b: &GrayImage) -> GrayImage {
+	ImageBuffer::from_fn(a.width(), a.height(), |x, y| {
+		let (pa, pb) = (a.get_pixel(x, y)[0], b.get_pixel(x, y)[0]);
+		if pa == 0 || pb == 0 {
+			Luma([0])
+		} else {
+			Luma([pa.abs_diff(pb)])
+		}
+	})
 }
 
 fn accumulate(acc: &mut [f64], w: &mut [u32], img: &GrayImage, weight: f64) {
@@ -471,58 +431,6 @@ fn normalize_blend(acc: &[f64], weights: &[u32], width: u32, height: u32) -> Gra
 	out
 }
 
-fn compare_overlap(a: &GrayImage, b: &GrayImage) -> (f64, f64, u32) {
-	assert_eq!(a.dimensions(), b.dimensions());
-	let mut n = 0u32;
-	let mut sum_a = 0f64;
-	let mut sum_b = 0f64;
-	let mut sum_aa = 0f64;
-	let mut sum_bb = 0f64;
-	let mut sum_ab = 0f64;
-	let mut mae = 0f64;
-
-	for (pa, pb) in a.pixels().zip(b.pixels()) {
-		if pa[0] == 0 || pb[0] == 0 {
-			continue;
-		}
-		let av = pa[0] as f64;
-		let bv = pb[0] as f64;
-		n += 1;
-		mae += (av - bv).abs();
-		sum_a += av;
-		sum_b += bv;
-		sum_aa += av * av;
-		sum_bb += bv * bv;
-		sum_ab += av * bv;
-	}
-
-	if n == 0 {
-		return (f64::NAN, f64::NAN, 0);
-	}
-
-	let nf = n as f64;
-	mae /= nf;
-	let cov = sum_ab - sum_a * sum_b / nf;
-	let var_a = sum_aa - sum_a * sum_a / nf;
-	let var_b = sum_bb - sum_b * sum_b / nf;
-	let ncc = if var_a > 1e-6 && var_b > 1e-6 {
-		cov / (var_a.sqrt() * var_b.sqrt())
-	} else {
-		f64::NAN
-	};
-	(mae, ncc, n)
-}
-
-fn abs_diff(a: &GrayImage, b: &GrayImage) -> GrayImage {
-	ImageBuffer::from_fn(a.width(), a.height(), |x, y| {
-		let pa = a.get_pixel(x, y)[0];
-		let pb = b.get_pixel(x, y)[0];
-		if pa == 0 || pb == 0 {
-			return Luma([0]);
-		}
-		Luma([pa.abs_diff(pb)])
-	})
-}
 
 fn blend_overlay(base: &GrayImage, top: &GrayImage, alpha: f64) -> GrayImage {
 	ImageBuffer::from_fn(base.width(), base.height(), |x, y| {
@@ -577,36 +485,13 @@ fn write_side_by_side(path: &Utf8Path, left: &GrayImage, right: &GrayImage) -> R
 mod tests {
 	use super::*;
 
-	fn test_k() -> Matrix3<f64> {
-		mat3([100.0, 0.0, 50.0, 0.0, 100.0, 40.0, 0.0, 0.0, 1.0])
-	}
-
 	fn solid_image(w: u32, h: u32, value: u8) -> GrayImage {
 		ImageBuffer::from_fn(w, h, |_, _| Luma([value]))
 	}
 
-	#[test]
-	fn homography_identity_for_same_camera() {
-		let k = test_k();
-		let r = Matrix3::identity();
-		let t = Vector3::zeros();
-		let h = homography_infinity(&k, &r, &t, &k, &r, &t);
-		let p = h * Vector3::new(120.0, 80.0, 1.0);
-		assert!((p.x / p.z - 120.0).abs() < 1e-6);
-		assert!((p.y / p.z - 80.0).abs() < 1e-6);
-	}
-
-	#[test]
-	fn scaled_k_scales_focal_and_principal_point() {
-		let k = scaled_k(
-			[200.0, 0.0, 100.0, 0.0, 200.0, 80.0, 0.0, 0.0, 1.0],
-			4,
-		);
-		assert!((k[(0, 0)] - 50.0).abs() < 1e-9);
-		assert!((k[(0, 2)] - 25.0).abs() < 1e-9);
-		assert!((k[(1, 1)] - 50.0).abs() < 1e-9);
-		assert!((k[(1, 2)] - 20.0).abs() < 1e-9);
-	}
+	// Primitive-level tests (homography, K scaling, bilinear sampling) live in
+	// `openfusion`, where those functions now live. What is tested here is only
+	// what this file adds: the GrayImage adapters and the blend.
 
 	#[test]
 	fn warp_identity_preserves_uniform_image() {
@@ -619,17 +504,6 @@ mod tests {
 				assert_eq!(out.get_pixel(x, y)[0], 128);
 			}
 		}
-	}
-
-	#[test]
-	fn sample_bilinear_interpolates() {
-		let mut img = GrayImage::new(2, 2);
-		img.put_pixel(0, 0, Luma([0]));
-		img.put_pixel(1, 0, Luma([100]));
-		img.put_pixel(0, 1, Luma([200]));
-		img.put_pixel(1, 1, Luma([255]));
-		let v = sample_bilinear(&img, 0.5, 0.5, 2, 2);
-		assert_eq!(v, 139);
 	}
 
 	#[test]
